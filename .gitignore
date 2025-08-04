@@ -1,0 +1,19 @@
+# Ignore frontend & backend node_modules
+frontend/node_modules/
+backend/node_modules/
+
+# Cache folders
+frontend/.cache/
+backend/.cache/
+
+# Build folders
+frontend/dist/
+backend/dist/
+
+# Env files
+*.env
+
+# System
+.DS_Store
+Thumbs.db
+# Logs
