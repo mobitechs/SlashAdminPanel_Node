@@ -108,6 +108,8 @@ mountRoute('/api/videos', './routes/videos', 'App Demo Videos');
 mountRoute('/api/stores-sequence', './routes/stores-sequence', 'Top Stores');
 mountRoute('/api/surveys', './routes/surveys', 'Survey');
 
+mountRoute('/api/daily-rewards', './routes/dailyRewards', 'Daily Rewards');
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('❌ Error:', err.stack);

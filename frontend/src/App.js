@@ -46,6 +46,12 @@ import SettlementForm from './pages/SettlementForm';
 import SettlementEdit from './pages/SettlementEdit';
 import StoreWiseSettlements from './pages/StoreWiseSettlements';
 
+// 🆕 NEW: Daily Rewards Management
+import DailyRewardsManagement from './pages/DailyRewardsManagement';
+import DailyRewardsDetails from './pages/DailyRewardsDetails';
+import DailyRewardsForm from './pages/DailyRewardsForm';
+import SpinWheelRewardsForm from './pages/SpinWheelRewardsForm';
+
 import ContentManagement from './pages/content/ContentManagement';
 import FAQManagement from './pages/content/FAQManagement';
 import FAQForm from './pages/content/FAQForm';
@@ -139,6 +145,16 @@ function App() {
               <Route path="rewards/add" element={<RewardForm />} />
               <Route path="rewards/:id" element={<RewardDetails />} />
               <Route path="rewards/:id/edit" element={<RewardEdit />} />
+
+              {/* 🆕 NEW: Daily Rewards Management Routes */}
+              <Route path="daily-rewards" element={<DailyRewardsManagement />} />
+              <Route path="daily-rewards/campaigns/:id" element={<DailyRewardsDetails />} />
+              <Route path="daily-rewards/campaigns/add" element={<DailyRewardsForm isEdit={false} />} />
+              <Route path="daily-rewards/campaigns/:id/edit" element={<DailyRewardsForm isEdit={true} />} />
+              
+              {/* 🆕 NEW: Spin Wheel Rewards Routes */}
+              <Route path="daily-rewards/rewards/add" element={<SpinWheelRewardsForm isEdit={false} />} />
+              <Route path="daily-rewards/rewards/:id/edit" element={<SpinWheelRewardsForm isEdit={true} />} />
 
               {/* Reward History Routes */}
               <Route path="reward-history" element={<RewardHistoryManagement />} />

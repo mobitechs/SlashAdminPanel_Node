@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   Home, Users, ShoppingBag, Gift, CreditCard, Calculator, 
   Trophy, BarChart3, Settings, LogOut, Bell, Search,
-  FileText, HelpCircle, Video, Star, ClipboardList
+  FileText, HelpCircle, Video, Star, ClipboardList, Zap
 } from 'lucide-react';
 
 const DashboardLayout = () => {
@@ -68,6 +68,12 @@ const DashboardLayout = () => {
       description: 'Reward Management'
     },
     {
+      label: 'Daily Rewards', // 🆕 NEW: Added Daily Rewards
+      icon: Zap,
+      path: '/daily-rewards',
+      description: 'Daily Spin Rewards'
+    },
+    {
       label: 'Reward History',
       icon: BarChart3,
       path: '/reward-history',
@@ -126,7 +132,27 @@ const DashboardLayout = () => {
           </div>
           
           {/* Settlements and other financial items */}
-          {menuItems.slice(4, 8).map((item) => (
+          {menuItems.slice(4, 5).map((item) => (
+            <div key={item.path} className="nav-item">
+              <Link
+                to={item.path}
+                className={`nav-link ${isActive(item.path) ? 'active' : ''}`}
+                title={item.description}
+              >
+                <div className="nav-icon">
+                  <item.icon size={16} />
+                </div>
+                <span>{item.label}</span>
+              </Link>
+            </div>
+          ))}
+
+          <div className="nav-section" style={{marginTop: 'var(--spacing-lg)'}}>
+            <div className="section-title">Rewards & Engagement</div>
+          </div>
+          
+          {/* Rewards section: Coupons, Rewards, Daily Rewards, Reward History */}
+          {menuItems.slice(5, 9).map((item) => (
             <div key={item.path} className="nav-item">
               <Link
                 to={item.path}
@@ -146,7 +172,7 @@ const DashboardLayout = () => {
           </div>
           
           {/* Content and other management items */}
-          {menuItems.slice(8).map((item) => (
+          {menuItems.slice(9).map((item) => (
             <div key={item.path} className="nav-item">
               <Link
                 to={item.path}
@@ -212,7 +238,7 @@ const DashboardLayout = () => {
             <Search className="search-icon" />
             <input 
               type="text" 
-              placeholder="Search users, stores, transactions, settlements..." 
+              placeholder="Search users, stores, transactions, settlements, rewards..." 
               className="search-input"
             />
           </div>
