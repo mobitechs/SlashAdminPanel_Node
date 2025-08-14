@@ -856,4 +856,83 @@ router.delete('/rewards/:id', async (req, res) => {
   }
 });
 
+// Add this route to your routes/transactions.js or routes/daily-rewards.js
+
+// GET /api/transactions/search/coupons - Search coupons in coupon_master for daily rewards
+
+// Alternative endpoint specifically for daily rewards if you want a separate route
+// GET /api/daily-rewards/search/coupons
+router.get('/daily-rewards/search/coupons', async (req, res) => {
+  try {
+    console.log('🔍 GET /api/daily-rewards/search/coupons - Daily rewards coupon search');
+    
+    const { q: searchQuery, limit = 20 } = req.query;
+    
+    if (!searchQuery || searchQuery.length < 1) {
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    console.log(`🔍 Daily rewards searching for: "${searchQuery}"`);
+    
+    const searchPattern = `%${searchQuery}%`;
+    const limitInt = Math.min(50, parseInt(limit) || 20);
+    
+    // Search in coupon_master table
+    const query = `
+      SELECT 
+        coupon_id as id,
+        coupon_name as code,
+        coupon_name as name,
+        coupon_name as title,
+        description,
+        discount_type,
+        discount_value,
+        is_active,
+        valid_from,
+        valid_till,
+        for_all_store,
+        for_specific_store,
+        store_id,
+        created_at,
+        updated_at
+      FROM coupon_master
+      WHERE (coupon_name LIKE ? OR description LIKE ?)
+        AND is_active = 1
+      ORDER BY coupon_name ASC
+      LIMIT ?
+    `;
+    
+    const [coupons] = await pool.execute(query, [searchPattern, searchPattern, limitInt]);
+    
+    // Filter by validity if needed
+    const currentTime = Math.floor(Date.now() / 1000);
+    const validCoupons = coupons.filter(coupon => {
+      // If valid_from and valid_till are set, check validity
+      if (coupon.valid_from && coupon.valid_till) {
+        return currentTime >= coupon.valid_from && currentTime <= coupon.valid_till;
+      }
+      // If no validity dates, consider it valid
+      return true;
+    });
+    
+    console.log(`✅ Daily rewards found ${validCoupons.length} valid coupons matching "${searchQuery}"`);
+    
+    res.json({
+      success: true,
+      data: validCoupons
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in daily rewards coupon search:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to search coupons for daily rewards',
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

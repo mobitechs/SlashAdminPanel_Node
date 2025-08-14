@@ -65,51 +65,88 @@ const SpinWheelRewardsForm = ({ isEdit = false }) => {
 
   // Search coupons
   const searchCoupons = useCallback(async (searchTerm) => {
-    if (!searchTerm || searchTerm.length < 2) {
-      setCouponSearchResults([]);
-      return;
-    }
+  if (!searchTerm || searchTerm.length < 2) {
+    setCouponSearchResults([]);
+    return;
+  }
 
-    try {
-      setCouponSearchLoading(true);
-      
-      const endpoints = [
-        `${API_BASE_URL}/transactions/search/coupons?q=${encodeURIComponent(searchTerm)}`,
-        `/api/transactions/search/coupons?q=${encodeURIComponent(searchTerm)}`
-      ];
+  try {
+    setCouponSearchLoading(true);
+    console.log(`🔍 Searching coupons in coupon_master for: "${searchTerm}"`);
+    
+    // Updated endpoints to use coupon_master search
+    const endpoints = [
+      `${API_BASE_URL}/transactions/search/coupons?q=${encodeURIComponent(searchTerm)}`,
+      `/api/transactions/search/coupons?q=${encodeURIComponent(searchTerm)}`,
+      `${API_BASE_URL}/daily-rewards/search/coupons?q=${encodeURIComponent(searchTerm)}`,
+      `/api/daily-rewards/search/coupons?q=${encodeURIComponent(searchTerm)}`
+    ];
 
-      let couponData = null;
+    let couponData = null;
 
-      for (const endpoint of endpoints) {
-        try {
-          const response = await fetch(endpoint, {
-            method: 'GET',
-            headers: getHeaders(),
-            credentials: 'include'
-          });
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`🔄 Trying coupon search endpoint: ${endpoint}`);
+        
+        const response = await fetch(endpoint, {
+          method: 'GET',
+          headers: getHeaders(),
+          credentials: 'include'
+        });
 
-          if (response.ok) {
-            const data = await response.json();
-            couponData = data;
-            break;
-          }
-        } catch (err) {
-          continue;
+        console.log(`📡 Coupon search response status: ${response.status}`);
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Coupon search API response:', data);
+          couponData = data;
+          break;
+        } else {
+          const errorText = await response.text();
+          console.warn(`⚠️ Coupon search endpoint ${endpoint} failed:`, response.status, errorText);
         }
+      } catch (err) {
+        console.warn(`⚠️ Coupon search endpoint ${endpoint} error:`, err.message);
+        continue;
       }
-
-      if (couponData && couponData.success) {
-        setCouponSearchResults(couponData.data || []);
-      } else {
-        setCouponSearchResults([]);
-      }
-    } catch (error) {
-      console.error('Coupon search failed:', error);
-      setCouponSearchResults([]);
-    } finally {
-      setCouponSearchLoading(false);
     }
-  }, [API_BASE_URL]);
+
+    if (couponData && couponData.success) {
+      // Process coupon_master data to match expected format
+      const processedCoupons = (couponData.data || []).map(coupon => {
+        console.log('🔍 Processing coupon from coupon_master:', coupon);
+        
+        return {
+          id: coupon.id || coupon.coupon_id,
+          code: coupon.code || coupon.coupon_name,
+          title: coupon.title || coupon.coupon_name,
+          name: coupon.name || coupon.title || coupon.coupon_name,
+          description: coupon.description,
+          discount_type: coupon.discount_type,
+          discount_value: coupon.discount_value,
+          // Add compatibility fields for display
+          discount_amount: coupon.discount_amount || (coupon.discount_type === 'fixed' ? coupon.discount_value : null),
+          discount_percentage: coupon.discount_percentage || (coupon.discount_type === 'percentage' ? coupon.discount_value : null),
+          is_active: coupon.is_active,
+          store_id: coupon.store_id
+        };
+      });
+      
+      console.log(`✅ Processed ${processedCoupons.length} coupons for search results`);
+      console.log('📋 Sample processed coupon:', processedCoupons[0]);
+      
+      setCouponSearchResults(processedCoupons);
+    } else {
+      console.log('⚠️ No coupon data received or unsuccessful response');
+      setCouponSearchResults([]);
+    }
+  } catch (error) {
+    console.error('❌ Coupon search failed:', error);
+    setCouponSearchResults([]);
+  } finally {
+    setCouponSearchLoading(false);
+  }
+}, [API_BASE_URL]);
 
   // Debounced coupon search
   const debouncedCouponSearch = useCallback(debounce(searchCoupons, 300), [searchCoupons]);

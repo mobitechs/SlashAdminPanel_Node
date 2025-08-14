@@ -993,138 +993,100 @@ router.get('/search/stores', async (req, res) => {
 
 
 // GET /api/transactions/search/coupons - Search coupons for transaction forms
-// GET /api/transactions/search/coupons - Search coupons for transaction forms (DEBUG VERSION)
+// Add this to your existing routes/transactions.js file
+
+// GET /api/transactions/search/coupons - Search coupons in coupon_master for daily rewards
 router.get('/search/coupons', async (req, res) => {
   try {
-    console.log('🔍 GET /api/transactions/search/coupons - Searching coupons');
+    console.log('🔍 GET /api/transactions/search/coupons - Searching coupons in coupon_master for daily rewards');
     
-    const { q: searchTerm } = req.query;
+    const { q: searchQuery } = req.query;
     
-    if (!searchTerm || searchTerm.length < 2) {
+    if (!searchQuery || searchQuery.length < 1) {
       return res.json({
         success: true,
-        data: [],
-        message: 'Search term too short'
+        data: []
       });
     }
 
-    const searchPattern = `%${searchTerm}%`;
-    const currentDate = new Date().toISOString().split('T')[0];
+    console.log(`🔍 Searching for pattern: "%${searchQuery}%"`);
     
-    console.log(`🔍 Searching for pattern: "${searchPattern}"`);
-    console.log(`📅 Current date: ${currentDate}`);
+    const searchPattern = `%${searchQuery}%`;
     
-    // Try to search coupons with debug info
-    try {
-      // First, let's see all coupons to understand the data
-      const [allCoupons] = await pool.execute(`
-        SELECT 
-          c.id,
-          c.code,
-          c.title,
-          c.description,
-          c.discount_amount,
-          c.discount_percentage,
-          c.store_id,
-          c.min_order_amount,
-          c.max_discount,
-          c.valid_from,
-          c.valid_until,
-          c.usage_limit,
-          c.is_active
-        FROM coupons c
-        LIMIT 5
-      `);
-      
-      console.log('📋 Sample coupons in database:', allCoupons);
-      
-      // Now search with less restrictive conditions
-      const [couponsStep1] = await pool.execute(`
-        SELECT 
-          c.id,
-          c.code,
-          c.title,
-          c.is_active,
-          c.valid_from,
-          c.valid_until,
-          LOWER(COALESCE(c.code, '')) as lower_code,
-          LOWER(?) as search_pattern
-        FROM coupons c
-        WHERE LOWER(COALESCE(c.code, '')) LIKE LOWER(?)
-      `, [searchPattern, searchPattern]);
-      
-      console.log('🔍 Step 1 - Code match only:', couponsStep1);
-      
-      // Add active filter
-      const [couponsStep2] = await pool.execute(`
-        SELECT 
-          c.id,
-          c.code,
-          c.title,
-          c.is_active,
-          c.valid_from,
-          c.valid_until
-        FROM coupons c
-        WHERE LOWER(COALESCE(c.code, '')) LIKE LOWER(?)
-        AND c.is_active = 1
-      `, [searchPattern]);
-      
-      console.log('🔍 Step 2 - Code + Active filter:', couponsStep2);
-      
-      // Final query with all conditions but more flexible date handling
-      const [finalCoupons] = await pool.execute(`
-        SELECT 
-          c.id,
-          c.code,
-          c.title as name,
-          c.description,
-          c.discount_amount,
-          c.discount_percentage,
-          c.store_id,
-          c.min_order_amount,
-          c.max_discount,
-          c.valid_from,
-          c.valid_until,
-          c.usage_limit,
-          c.is_active
-        FROM coupons c
-        WHERE LOWER(COALESCE(c.code, '')) LIKE LOWER(?)
-        AND c.is_active = 1
-        AND (c.valid_from IS NULL OR DATE(c.valid_from) <= ?)
-        AND (c.valid_until IS NULL OR DATE(c.valid_until) >= ?)
-        ORDER BY c.code
-        LIMIT 10
-      `, [searchPattern, currentDate, currentDate]);
-
-      console.log(`✅ Final result: Found ${finalCoupons.length} coupons matching "${searchTerm}"`);
-      console.log('📋 Final coupons:', finalCoupons);
-
-      res.json({
-        success: true,
-        data: finalCoupons,
-        count: finalCoupons.length,
-        debug: {
-          searchPattern,
-          currentDate,
-          allCouponsCount: allCoupons.length,
-          step1Count: couponsStep1.length,
-          step2Count: couponsStep2.length,
-          finalCount: finalCoupons.length
-        }
-      });
-    } catch (tableError) {
-      console.warn('⚠️ Coupons table error:', tableError.message);
-      res.json({
-        success: true,
-        data: [],
-        count: 0,
-        message: 'Coupons feature not available',
-        error: tableError.message
-      });
-    }
-
+    // FIXED: Search in coupon_master table with correct column names
+    let query = `
+      SELECT 
+        coupon_id as id,
+        coupon_name as code,
+        coupon_name as title,
+        description,
+        discount_type,
+        discount_value,
+        is_active,
+        valid_from,
+        valid_till,
+        for_all_store,
+        for_specific_store,
+        store_id,
+        created_at
+      FROM coupon_master
+      WHERE (coupon_name LIKE ? OR description LIKE ?)
+        AND is_active = 1
+    `;
+    
+    const params = [searchPattern, searchPattern];
+    
+    console.log('🔍 Search query:', query);
+    console.log('🔍 Parameters:', params);
+    
+    // Execute search
+    const [searchResults] = await pool.execute(query, params);
+    console.log(`🔍 Found ${searchResults.length} total matches`);
+    
+    // Check validity dates (if they're timestamps)
+    const currentTime = Date.now() / 1000; // Current timestamp
+    const validCoupons = searchResults.filter(coupon => {
+      // If valid_from and valid_till are timestamps, check validity
+      if (coupon.valid_from && coupon.valid_till) {
+        return currentTime >= coupon.valid_from && currentTime <= coupon.valid_till;
+      }
+      // If no validity dates, consider it valid
+      return true;
+    });
+    
+    // Process coupons to match expected format for daily rewards
+    const processedCoupons = validCoupons.map(coupon => ({
+      id: coupon.id,
+      code: coupon.code,
+      title: coupon.title,
+      name: coupon.title, // Add name field for compatibility
+      description: coupon.description,
+      discount_type: coupon.discount_type,
+      discount_value: coupon.discount_value,
+      // Map to expected fields for display
+      discount_amount: coupon.discount_type === 'fixed' ? coupon.discount_value : null,
+      discount_percentage: coupon.discount_type === 'percentage' ? coupon.discount_value : null,
+      is_active: coupon.is_active,
+      store_id: coupon.store_id,
+      created_at: coupon.created_at
+    }));
+    
+    console.log(`✅ Final result: Found ${processedCoupons.length} valid coupons matching "${searchQuery}"`);
+    console.log('📋 Final coupons:', processedCoupons.map(c => ({
+      id: c.id,
+      code: c.code,
+      title: c.title,
+      discount_type: c.discount_type,
+      discount_value: c.discount_value
+    })));
+    
+    res.json({
+      success: true,
+      data: processedCoupons
+    });
+    
   } catch (error) {
-    console.error('❌ Coupon search error:', error);
+    console.error('❌ Error searching coupons in coupon_master:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to search coupons',
