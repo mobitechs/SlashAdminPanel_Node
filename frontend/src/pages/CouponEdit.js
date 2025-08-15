@@ -1,9 +1,9 @@
-// pages/CouponEdit.js - Optimized Layout matching CouponForm
+// pages/CouponEdit.js - UPDATED with Transaction-style search UI for coupon_master table
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
   Save, X, Ticket, Tag, Percent, Calendar,
-  Store, Target, Gift, AlertCircle
+  Store, Target, Gift, AlertCircle, Users, User, Search
 } from 'lucide-react';
 import ErrorState from '../components/common/ErrorState';
 import '../styles/AdminStyles.css';
@@ -16,20 +16,37 @@ const CouponEdit = () => {
   const [error, setError] = useState(null);
   const [stores, setStores] = useState([]);
   
-  // Form data state with coupon fields
+  // Search states
+  const [userSearch, setUserSearch] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  
+  const [storeSearch, setStoreSearch] = useState('');
+  const [storeSearchResults, setStoreSearchResults] = useState([]);
+  const [storeSearchLoading, setStoreSearchLoading] = useState(false);
+  const [selectedStore, setSelectedStore] = useState(null);
+  
+  // Form data state with coupon_master fields
   const [formData, setFormData] = useState({
-    code: '',
-    title: '',
+    coupon_name: '',
     description: '',
-    discount_type: 'percentage', // 'percentage' or 'amount'
-    discount_amount: '',
-    discount_percentage: '',
-    store_id: '',
-    min_order_amount: '',
-    max_discount: '',
+    discount_type: 'percentage',
+    discount_value: '',
     valid_from: '',
-    valid_until: '',
-    usage_limit: 1,
+    valid_till: '',
+    lifetime_validity: 0,
+    for_all_user: 1,
+    for_all_vip_user: 0,
+    for_specific_user: 0,
+    for_all_store: 1,
+    for_all_premium_store: 0,
+    for_specific_store: 0,
+    for_new_user: 0,
+    new_user_name: '',
+    new_user_mobile_no: '',
+    store_id: '',
+    user_id: '',
     is_active: 1
   });
 
@@ -60,6 +77,97 @@ const CouponEdit = () => {
     
     return headers;
   };
+
+  // Debounced search function
+  const debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  };
+
+  // Search users
+  const searchUsers = async (searchTerm) => {
+    if (!searchTerm || searchTerm.length < 2) {
+      setUserSearchResults([]);
+      return;
+    }
+
+    try {
+      setUserSearchLoading(true);
+      
+      const endpoints = [
+        `${API_BASE_URL}/users?search=${encodeURIComponent(searchTerm)}&limit=10`,
+        `/api/users?search=${encodeURIComponent(searchTerm)}&limit=10`
+      ];
+
+      let userData = null;
+
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'GET',
+            headers: getHeaders(),
+            credentials: 'include'
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            userData = data;
+            break;
+          }
+        } catch (err) {
+          continue;
+        }
+      }
+
+      if (userData && userData.success) {
+        setUserSearchResults(userData.data?.users || userData.data || []);
+      } else {
+        setUserSearchResults([]);
+      }
+    } catch (error) {
+      console.error('User search failed:', error);
+      setUserSearchResults([]);
+    } finally {
+      setUserSearchLoading(false);
+    }
+  };
+
+  // Search stores
+  const searchStores = async (searchTerm) => {
+    if (!searchTerm || searchTerm.length < 2) {
+      setStoreSearchResults([]);
+      return;
+    }
+
+    try {
+      setStoreSearchLoading(true);
+      
+      const filteredStores = stores.filter(store => 
+        store.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        store.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        store.address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        store.email?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      
+      setStoreSearchResults(filteredStores);
+    } catch (error) {
+      console.error('Store search failed:', error);
+      setStoreSearchResults([]);
+    } finally {
+      setStoreSearchLoading(false);
+    }
+  };
+
+  // Debounced search functions
+  const debouncedUserSearch = debounce(searchUsers, 300);
+  const debouncedStoreSearch = debounce(searchStores, 300);
 
   // Fetch stores for dropdown
   const fetchStores = async () => {
@@ -111,8 +219,13 @@ const CouponEdit = () => {
 
       const couponData = data.data.coupon;
       
-      if (!couponData.id || couponData.id != id) {
-        throw new Error(`Coupon ID mismatch: expected ${id}, got ${couponData.id}`);
+      if (!couponData.id && !couponData.coupon_id) {
+        throw new Error(`Invalid coupon data received for ID: ${id}`);
+      }
+      
+      const couponId = couponData.id || couponData.coupon_id;
+      if (couponId != id) {
+        throw new Error(`Coupon ID mismatch: expected ${id}, got ${couponId}`);
       }
       
       // Convert dates to YYYY-MM-DD format for date inputs
@@ -124,28 +237,47 @@ const CouponEdit = () => {
           return '';
         }
       };
-
-      // Determine discount type
-      const discountType = couponData.discount_percentage ? 'percentage' : 'amount';
       
       // Set form data with all fields
       setFormData({
-        code: couponData.code || '',
-        title: couponData.title || '',
+        coupon_name: couponData.coupon_name || '',
         description: couponData.description || '',
-        discount_type: discountType,
-        discount_amount: couponData.discount_amount || '',
-        discount_percentage: couponData.discount_percentage || '',
-        store_id: couponData.store_id || '',
-        min_order_amount: couponData.min_order_amount || '',
-        max_discount: couponData.max_discount || '',
+        discount_type: couponData.discount_type || 'percentage',
+        discount_value: couponData.discount_value || '',
         valid_from: formatDateForInput(couponData.valid_from),
-        valid_until: formatDateForInput(couponData.valid_until),
-        usage_limit: couponData.usage_limit || 1,
+        valid_till: formatDateForInput(couponData.valid_till || couponData.valid_until),
+        lifetime_validity: couponData.lifetime_validity || 0,
+        for_all_user: couponData.for_all_user || 0,
+        for_all_vip_user: couponData.for_all_vip_user || 0,
+        for_specific_user: couponData.for_specific_user || 0,
+        for_all_store: couponData.for_all_store || 0,
+        for_all_premium_store: couponData.for_all_premium_store || 0,
+        for_specific_store: couponData.for_specific_store || 0,
+        for_new_user: couponData.for_new_user || 0,
+        new_user_name: couponData.new_user_name || '',
+        new_user_mobile_no: couponData.new_user_mobile_no || '',
+        store_id: couponData.store_id || '',
+        user_id: couponData.user_id || '',
         is_active: couponData.is_active || 1
       });
+
+      // Set initial search values if specific user/store is selected
+      if (couponData.for_specific_user && couponData.user_id) {
+        // You might want to fetch the user details to show in search
+        setUserSearch(`User ID: ${couponData.user_id}`);
+      }
+
+      if (couponData.for_specific_store && couponData.store_id) {
+        const store = stores.find(s => s.id === couponData.store_id);
+        if (store) {
+          setStoreSearch(`${store.name} (${store.email || 'No email'})`);
+          setSelectedStore(store);
+        } else {
+          setStoreSearch(`Store ID: ${couponData.store_id}`);
+        }
+      }
       
-      console.log('✅ Coupon edit data loaded successfully for coupon:', couponData.id);
+      console.log('✅ Coupon edit data loaded successfully for coupon:', couponId);
 
     } catch (error) {
       console.error(`❌ Failed to fetch coupon ${id} for editing:`, error.message);
@@ -157,8 +289,22 @@ const CouponEdit = () => {
 
   useEffect(() => {
     fetchStores();
-    fetchCouponData();
-  }, [id]);
+  }, []);
+
+  useEffect(() => {
+    if (stores.length > 0) {
+      fetchCouponData();
+    }
+  }, [id, stores]);
+
+  // Handle search input changes
+  useEffect(() => {
+    debouncedUserSearch(userSearch);
+  }, [userSearch]);
+
+  useEffect(() => {
+    debouncedStoreSearch(storeSearch);
+  }, [storeSearch]);
 
   // Handle form input changes
   const handleInputChange = (e) => {
@@ -185,76 +331,113 @@ const CouponEdit = () => {
     }
   };
 
-  // Handle discount type change
-  const handleDiscountTypeChange = (e) => {
-    const discountType = e.target.value;
+  // Handle store targeting change
+  const handleStoreTargetingChange = (targetType) => {
     setFormData(prev => ({
       ...prev,
-      discount_type: discountType,
-      discount_amount: discountType === 'amount' ? prev.discount_amount : '',
-      discount_percentage: discountType === 'percentage' ? prev.discount_percentage : ''
+      for_all_store: targetType === 'all' ? 1 : 0,
+      for_all_premium_store: targetType === 'premium' ? 1 : 0,
+      for_specific_store: targetType === 'specific' ? 1 : 0,
+      store_id: targetType === 'specific' ? prev.store_id : ''
     }));
+
+    // Reset store selection when changing targeting type
+    if (targetType !== 'specific') {
+      setSelectedStore(null);
+      setStoreSearch('');
+      setStoreSearchResults([]);
+    }
+  };
+
+  // Handle user targeting change
+  const handleUserTargetingChange = (targetType) => {
+    setFormData(prev => ({
+      ...prev,
+      for_all_user: targetType === 'all' ? 1 : 0,
+      for_all_vip_user: targetType === 'vip' ? 1 : 0,
+      for_specific_user: targetType === 'specific' ? 1 : 0,
+      for_new_user: targetType === 'new' ? 1 : 0,
+      new_user_name: targetType === 'new' ? prev.new_user_name : '',
+      new_user_mobile_no: targetType === 'new' ? prev.new_user_mobile_no : '',
+      user_id: targetType === 'specific' ? prev.user_id : ''
+    }));
+
+    // Reset user selection when changing targeting type
+    if (targetType !== 'specific') {
+      setSelectedUser(null);
+      setUserSearch('');
+      setUserSearchResults([]);
+    }
+  };
+
+  // Handle user selection
+  const handleUserSelect = (user) => {
+    setSelectedUser(user);
+    setUserSearch(`${user.first_name} ${user.last_name} (${user.email})`);
+    setFormData(prev => ({
+      ...prev,
+      user_id: user.id
+    }));
+    setUserSearchResults([]);
+  };
+
+  // Handle store selection
+  const handleStoreSelect = (store) => {
+    setSelectedStore(store);
+    setStoreSearch(`${store.name} (${store.email || 'No email'})`);
+    setFormData(prev => ({
+      ...prev,
+      store_id: store.id
+    }));
+    setStoreSearchResults([]);
   };
 
   // Validate form
   const validateForm = () => {
     const newErrors = {};
 
-    // Required fields validation
-    if (!formData.code.trim()) {
-      newErrors.code = 'Coupon code is required';
-    } else if (formData.code.length > 10) {
-      newErrors.code = 'Coupon code must be 10 characters or less';
+    if (!formData.coupon_name.trim()) {
+      newErrors.coupon_name = 'Coupon name is required';
     }
 
-    if (!formData.title.trim()) {
-      newErrors.title = 'Title is required';
+    if (!formData.discount_type) {
+      newErrors.discount_type = 'Discount type is required';
     }
 
-    if (!formData.valid_from) {
-      newErrors.valid_from = 'Valid from date is required';
+    if (!formData.discount_value || formData.discount_value <= 0) {
+      newErrors.discount_value = 'Discount value is required and must be greater than 0';
     }
 
-    if (!formData.valid_until) {
-      newErrors.valid_until = 'Valid until date is required';
+    if (formData.discount_type === 'percentage' && formData.discount_value > 100) {
+      newErrors.discount_value = 'Percentage discount cannot exceed 100%';
     }
 
-    // Date validation
-    if (formData.valid_from && formData.valid_until) {
-      const fromDate = new Date(formData.valid_from);
-      const untilDate = new Date(formData.valid_until);
-      
-      if (untilDate <= fromDate) {
-        newErrors.valid_until = 'Valid until date must be after valid from date';
+    if (!formData.lifetime_validity) {
+      if (!formData.valid_from) {
+        newErrors.valid_from = 'Valid from date is required';
+      }
+      if (!formData.valid_till) {
+        newErrors.valid_till = 'Valid till date is required';
+      }
+      if (formData.valid_from && formData.valid_till) {
+        const fromDate = new Date(formData.valid_from);
+        const tillDate = new Date(formData.valid_till);
+        if (tillDate <= fromDate) {
+          newErrors.valid_till = 'Valid till date must be after valid from date';
+        }
       }
     }
 
-    // Discount validation
-    if (formData.discount_type === 'percentage') {
-      if (!formData.discount_percentage || formData.discount_percentage <= 0) {
-        newErrors.discount_percentage = 'Discount percentage is required and must be greater than 0';
-      } else if (formData.discount_percentage > 100) {
-        newErrors.discount_percentage = 'Discount percentage cannot exceed 100%';
-      }
-    } else {
-      if (!formData.discount_amount || formData.discount_amount <= 0) {
-        newErrors.discount_amount = 'Discount amount is required and must be greater than 0';
-      }
+    if (formData.for_specific_store && !formData.store_id) {
+      newErrors.store_id = 'Store selection is required for specific store targeting';
     }
 
-    // Minimum order amount validation
-    if (formData.min_order_amount && formData.min_order_amount < 0) {
-      newErrors.min_order_amount = 'Minimum order amount cannot be negative';
+    if (formData.for_specific_user && !formData.user_id) {
+      newErrors.user_id = 'User selection is required for specific user targeting';
     }
 
-    // Maximum discount validation
-    if (formData.max_discount && formData.max_discount <= 0) {
-      newErrors.max_discount = 'Maximum discount must be greater than 0';
-    }
-
-    // Usage limit validation
-    if (!formData.usage_limit || formData.usage_limit < 1) {
-      newErrors.usage_limit = 'Usage limit must be at least 1';
+    if (formData.for_new_user && !formData.new_user_name) {
+      newErrors.new_user_name = 'User name is required for new user targeting';
     }
 
     setErrors(newErrors);
@@ -271,27 +454,13 @@ const CouponEdit = () => {
     setError(null);
 
     try {
-      // Prepare update data
-      const updateData = {
-        code: formData.code.trim().toUpperCase(),
-        title: formData.title.trim(),
-        description: formData.description.trim(),
-        store_id: formData.store_id || null,
-        min_order_amount: parseFloat(formData.min_order_amount) || 0,
-        max_discount: formData.max_discount ? parseFloat(formData.max_discount) : null,
-        valid_from: new Date(formData.valid_from).toISOString(),
-        valid_until: new Date(formData.valid_until).toISOString(),
-        usage_limit: parseInt(formData.usage_limit),
-        is_active: formData.is_active
-      };
-
-      // Set discount fields based on type
-      if (formData.discount_type === 'percentage') {
-        updateData.discount_percentage = parseFloat(formData.discount_percentage);
-        updateData.discount_amount = null;
-      } else {
-        updateData.discount_amount = parseFloat(formData.discount_amount);
-        updateData.discount_percentage = null;
+      const updateData = { ...formData };
+      
+      if (updateData.valid_from) {
+        updateData.valid_from = new Date(updateData.valid_from).toISOString();
+      }
+      if (updateData.valid_till) {
+        updateData.valid_till = new Date(updateData.valid_till).toISOString();
       }
 
       console.log(`🔄 Updating coupon ${id} with data:`, updateData);
@@ -314,7 +483,7 @@ const CouponEdit = () => {
       
       if (result.success) {
         alert('Coupon updated successfully!');
-        navigate(`/coupons/${id}`); // Navigate to details page
+        navigate(`/coupons/${id}`);
       } else {
         throw new Error(result.message || 'Update failed');
       }
@@ -325,6 +494,21 @@ const CouponEdit = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const getCurrentStoreTargeting = () => {
+    if (formData.for_all_store) return 'all';
+    if (formData.for_all_premium_store) return 'premium';
+    if (formData.for_specific_store) return 'specific';
+    return 'all';
+  };
+
+  const getCurrentUserTargeting = () => {
+    if (formData.for_all_user) return 'all';
+    if (formData.for_all_vip_user) return 'vip';
+    if (formData.for_specific_user) return 'specific';
+    if (formData.for_new_user) return 'new';
+    return 'all';
   };
 
   if (loading) {
@@ -338,8 +522,7 @@ const CouponEdit = () => {
     );
   }
 
-  // Show error state if API failed and no form data loaded
-  if (error && (!formData.code && !formData.title)) {
+  if (error && (!formData.coupon_name)) {
     return (
       <div className="page-container">
         <div className="chart-card">
@@ -349,12 +532,6 @@ const CouponEdit = () => {
             onRetry={fetchCouponData}
             backTo="/coupons"
             backText="Back to Coupons List"
-            debugInfo={{
-              "Coupon ID": id,
-              "API Base URL": API_BASE_URL,
-              "Expected Endpoint": `${API_BASE_URL}/coupons/${id}`,
-              "Error": error
-            }}
           />
         </div>
       </div>
@@ -379,7 +556,6 @@ const CouponEdit = () => {
         </div>
       )}
 
-      {/* Edit Form Layout */}
       <div className="chart-card">
         <div className="chart-header">
           <h3 className="chart-title">Edit Coupon #{id}</h3>
@@ -393,58 +569,37 @@ const CouponEdit = () => {
               Basic Information
             </h4>
             
-            {/* Coupon Code | Title */}
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 'var(--spacing-lg)', marginBottom: 'var(--spacing-lg)'}}>
+            <div style={{display: 'grid', gridTemplateColumns: '1fr', gap: 'var(--spacing-lg)', marginBottom: 'var(--spacing-lg)'}}>
               <div className="form-group">
-                <label className="form-label">Coupon Code *</label>
+                <label className="form-label">Coupon Name *</label>
                 <input
                   type="text"
-                  name="code"
-                  className="form-input"
-                  placeholder="e.g., SAVE20"
-                  value={formData.code}
-                  onChange={handleInputChange}
-                  maxLength="10"
-                  style={{borderColor: errors.code ? 'var(--error-border)' : undefined, textTransform: 'uppercase'}}
-                />
-                {errors.code && (
-                  <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                    {errors.code}
-                  </span>
-                )}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Title *</label>
-                <input
-                  type="text"
-                  name="title"
+                  name="coupon_name"
                   className="form-input"
                   placeholder="e.g., Save 20% on Electronics"
-                  value={formData.title}
+                  value={formData.coupon_name}
                   onChange={handleInputChange}
-                  style={{borderColor: errors.title ? 'var(--error-border)' : undefined}}
+                  style={{borderColor: errors.coupon_name ? 'var(--error-border)' : undefined}}
                 />
-                {errors.title && (
+                {errors.coupon_name && (
                   <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                    {errors.title}
+                    {errors.coupon_name}
                   </span>
                 )}
               </div>
-            </div>
 
-            {/* Description */}
-            <div className="form-group">
-              <label className="form-label">Description</label>
-              <textarea
-                name="description"
-                className="form-input"
-                placeholder="Describe the coupon and its terms..."
-                value={formData.description}
-                onChange={handleInputChange}
-                rows="3"
-                style={{resize: 'vertical'}}
-              />
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea
+                  name="description"
+                  className="form-input"
+                  placeholder="Describe the coupon and its terms..."
+                  value={formData.description}
+                  onChange={handleInputChange}
+                  rows="3"
+                  style={{resize: 'vertical'}}
+                />
+              </div>
             </div>
           </div>
 
@@ -455,215 +610,413 @@ const CouponEdit = () => {
               Discount Configuration
             </h4>
             
-            {/* Discount Type */}
-            <div className="form-group" style={{marginBottom: 'var(--spacing-lg)'}}>
-              <label className="form-label">Discount Type *</label>
-              <select
-                name="discount_type"
-                className="form-input"
-                value={formData.discount_type}
-                onChange={handleDiscountTypeChange}
-              >
-                <option value="percentage">Percentage Discount</option>
-                <option value="amount">Fixed Amount Discount</option>
-              </select>
-            </div>
-
-            {/* Discount Value | Min Order Amount */}
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-lg)', marginBottom: 'var(--spacing-lg)'}}>
-              {formData.discount_type === 'percentage' ? (
-                <div className="form-group">
-                  <label className="form-label">
-                    <Percent size={16} style={{marginRight: 'var(--spacing-sm)'}} />
-                    Discount Percentage *
-                  </label>
-                  <input
-                    type="number"
-                    name="discount_percentage"
-                    className="form-input"
-                    placeholder="e.g., 20"
-                    value={formData.discount_percentage}
-                    onChange={handleInputChange}
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    style={{borderColor: errors.discount_percentage ? 'var(--error-border)' : undefined}}
-                  />
-                  {errors.discount_percentage && (
-                    <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                      {errors.discount_percentage}
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <div className="form-group">
-                  <label className="form-label">
-                    <Gift size={16} style={{marginRight: 'var(--spacing-sm)'}} />
-                    Discount Amount (₹) *
-                  </label>
-                  <input
-                    type="number"
-                    name="discount_amount"
-                    className="form-input"
-                    placeholder="e.g., 50"
-                    value={formData.discount_amount}
-                    onChange={handleInputChange}
-                    min="0"
-                    step="0.01"
-                    style={{borderColor: errors.discount_amount ? 'var(--error-border)' : undefined}}
-                  />
-                  {errors.discount_amount && (
-                    <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                      {errors.discount_amount}
-                    </span>
-                  )}
-                </div>
-              )}
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-lg)'}}>
+              <div className="form-group">
+                <label className="form-label">Discount Type *</label>
+                <select
+                  name="discount_type"
+                  className="form-input"
+                  value={formData.discount_type}
+                  onChange={handleInputChange}
+                  style={{borderColor: errors.discount_type ? 'var(--error-border)' : undefined}}
+                >
+                  <option value="percentage">Percentage</option>
+                  <option value="fixed">Fixed Amount</option>
+                </select>
+                {errors.discount_type && (
+                  <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
+                    {errors.discount_type}
+                  </span>
+                )}
+              </div>
 
               <div className="form-group">
                 <label className="form-label">
-                  <Target size={16} style={{marginRight: 'var(--spacing-sm)'}} />
-                  Minimum Order Amount (₹)
+                  Discount Value * ({formData.discount_type === 'percentage' ? '%' : '₹'})
                 </label>
                 <input
                   type="number"
-                  name="min_order_amount"
+                  name="discount_value"
                   className="form-input"
-                  placeholder="e.g., 500"
-                  value={formData.min_order_amount}
+                  placeholder={formData.discount_type === 'percentage' ? 'e.g., 20' : 'e.g., 50'}
+                  value={formData.discount_value}
                   onChange={handleInputChange}
                   min="0"
+                  max={formData.discount_type === 'percentage' ? '100' : undefined}
                   step="0.01"
-                  style={{borderColor: errors.min_order_amount ? 'var(--error-border)' : undefined}}
+                  style={{borderColor: errors.discount_value ? 'var(--error-border)' : undefined}}
                 />
-                {errors.min_order_amount && (
+                {errors.discount_value && (
                   <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                    {errors.min_order_amount}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Max Discount | Usage Limit */}
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-lg)'}}>
-              <div className="form-group">
-                <label className="form-label">Maximum Discount Cap (₹)</label>
-                <input
-                  type="number"
-                  name="max_discount"
-                  className="form-input"
-                  placeholder="e.g., 200"
-                  value={formData.max_discount}
-                  onChange={handleInputChange}
-                  min="0"
-                  step="0.01"
-                  style={{borderColor: errors.max_discount ? 'var(--error-border)' : undefined}}
-                />
-                <small style={{color: 'var(--text-muted)', fontSize: '0.75rem'}}>
-                  Leave empty for no cap
-                </small>
-                {errors.max_discount && (
-                  <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                    {errors.max_discount}
-                  </span>
-                )}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Usage Limit *</label>
-                <input
-                  type="number"
-                  name="usage_limit"
-                  className="form-input"
-                  placeholder="e.g., 100"
-                  value={formData.usage_limit}
-                  onChange={handleInputChange}
-                  min="1"
-                  step="1"
-                  style={{borderColor: errors.usage_limit ? 'var(--error-border)' : undefined}}
-                />
-                {errors.usage_limit && (
-                  <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                    {errors.usage_limit}
+                    {errors.discount_value}
                   </span>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Store & Validity */}
+          {/* Validity Configuration */}
+          <div style={{marginBottom: 'var(--spacing-xl)'}}>
+            <h4 style={{fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
+              <Calendar size={18} />
+              Validity Configuration
+            </h4>
+            
+            <div style={{marginBottom: 'var(--spacing-lg)'}}>
+              <label style={{
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 'var(--spacing-md)', 
+                cursor: 'pointer',
+                padding: 'var(--spacing-md)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-glass)',
+                background: formData.lifetime_validity ? 'var(--success-bg)' : 'var(--bg-glass-light)',
+                transition: 'all 0.2s ease'
+              }}>
+                <input
+                  type="checkbox"
+                  name="lifetime_validity"
+                  checked={formData.lifetime_validity === 1}
+                  onChange={handleInputChange}
+                  className="checkbox-input"
+                />
+                <span style={{color: 'var(--text-secondary)', fontWeight: '500'}}>Lifetime Validity</span>
+                <span style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>
+                  (Coupon will never expire)
+                </span>
+              </label>
+            </div>
+
+            {!formData.lifetime_validity && (
+              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-lg)'}}>
+                <div className="form-group">
+                  <label className="form-label">Valid From *</label>
+                  <input
+                    type="date"
+                    name="valid_from"
+                    className="form-input"
+                    value={formData.valid_from}
+                    onChange={handleInputChange}
+                    style={{borderColor: errors.valid_from ? 'var(--error-border)' : undefined}}
+                  />
+                  {errors.valid_from && (
+                    <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
+                      {errors.valid_from}
+                    </span>
+                  )}
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Valid Till *</label>
+                  <input
+                    type="date"
+                    name="valid_till"
+                    className="form-input"
+                    value={formData.valid_till}
+                    onChange={handleInputChange}
+                    min={formData.valid_from || undefined}
+                    style={{borderColor: errors.valid_till ? 'var(--error-border)' : undefined}}
+                  />
+                  {errors.valid_till && (
+                    <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
+                      {errors.valid_till}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* User Targeting */}
+          <div style={{marginBottom: 'var(--spacing-xl)'}}>
+            <h4 style={{fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
+              <Users size={18} />
+              User Targeting
+            </h4>
+            
+            <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--spacing-md)', marginBottom: 'var(--spacing-lg)'}}>
+              {[
+                { value: 'all', label: 'All Users', icon: Users, description: 'Available to all registered users' },
+                { value: 'vip', label: 'VIP Users', icon: User, description: 'Only for VIP/Premium users' },
+                { value: 'new', label: 'New Users', icon: Gift, description: 'For new user registration' },
+                { value: 'specific', label: 'Specific User', icon: Target, description: 'For one specific user' }
+              ].map(option => (
+                <label 
+                  key={option.value}
+                  style={{
+                    display: 'flex', 
+                    alignItems: 'flex-start', 
+                    gap: 'var(--spacing-sm)', 
+                    cursor: 'pointer',
+                    padding: 'var(--spacing-md)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-glass)',
+                    background: getCurrentUserTargeting() === option.value ? 'var(--primary-bg)' : 'var(--bg-glass-light)',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="user_targeting"
+                    value={option.value}
+                    checked={getCurrentUserTargeting() === option.value}
+                    onChange={() => handleUserTargetingChange(option.value)}
+                    style={{marginTop: '2px'}}
+                  />
+                  <option.icon size={16} style={{marginTop: '2px', color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontWeight: '500', color: 'var(--text-secondary)'}}>{option.label}</div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>{option.description}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            {/* New User Fields */}
+            {formData.for_new_user === 1 && (
+              <div style={{
+                padding: 'var(--spacing-lg)', 
+                background: 'var(--bg-glass)', 
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-glass)'
+              }}>
+                <h5 style={{fontSize: '1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-md)'}}>
+                  New User Information
+                </h5>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-lg)'}}>
+                  <div className="form-group">
+                    <label className="form-label">User Name *</label>
+                    <input
+                      type="text"
+                      name="new_user_name"
+                      className="form-input"
+                      placeholder="Enter new user name"
+                      value={formData.new_user_name}
+                      onChange={handleInputChange}
+                      style={{borderColor: errors.new_user_name ? 'var(--error-border)' : undefined}}
+                    />
+                    {errors.new_user_name && (
+                      <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
+                        {errors.new_user_name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Mobile Number</label>
+                    <input
+                      type="text"
+                      name="new_user_mobile_no"
+                      className="form-input"
+                      placeholder="Enter mobile number"
+                      value={formData.new_user_mobile_no}
+                      onChange={handleInputChange}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Specific User Search */}
+            {formData.for_specific_user === 1 && (
+              <div className="form-group" style={{marginBottom: 'var(--spacing-lg)', position: 'relative'}}>
+                <label className="form-label">
+                  <Users size={16} style={{marginRight: 'var(--spacing-sm)'}} />
+                  Search & Select User *
+                </label>
+                <div style={{position: 'relative'}}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Search user by name or email..."
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    style={{borderColor: errors.user_id ? 'var(--error-border)' : undefined}}
+                  />
+                  <Search size={16} style={{
+                    position: 'absolute',
+                    right: 'var(--spacing-md)',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-disabled)'
+                  }} />
+                </div>
+                
+                {/* User Search Results */}
+                {userSearchResults.length > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-glass)',
+                    borderRadius: 'var(--radius-md)',
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    zIndex: 1000,
+                    marginTop: '0.25rem'
+                  }}>
+                    {userSearchResults.map(user => (
+                      <div
+                        key={user.id}
+                        style={{
+                          padding: 'var(--spacing-md)',
+                          cursor: 'pointer',
+                          borderBottom: '1px solid var(--border-light)',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.background = 'var(--bg-glass-light)'}
+                        onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                        onClick={() => handleUserSelect(user)}
+                      >
+                        <div style={{fontWeight: '500', color: 'var(--text-primary)'}}>
+                          {user.first_name} {user.last_name}
+                        </div>
+                        <div style={{fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
+                          {user.email} • ID: {user.id}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {userSearchLoading && (
+                  <div style={{fontSize: '0.875rem', color: 'var(--text-disabled)', marginTop: '0.25rem'}}>
+                    Searching users...
+                  </div>
+                )}
+                
+                {errors.user_id && (
+                  <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
+                    {errors.user_id}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Store Targeting */}
           <div style={{marginBottom: 'var(--spacing-xl)'}}>
             <h4 style={{fontSize: '1.1rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
               <Store size={18} />
-              Store & Validity
+              Store Targeting
             </h4>
             
-            {/* Store Selection */}
-            <div className="form-group" style={{marginBottom: 'var(--spacing-lg)'}}>
-              <label className="form-label">
-                <Store size={16} style={{marginRight: 'var(--spacing-sm)'}} />
-                Applicable Store
-              </label>
-              <select
-                name="store_id"
-                className="form-input"
-                value={formData.store_id}
-                onChange={handleInputChange}
-              >
-                <option value="">All Stores</option>
-                {stores.map(store => (
-                  <option key={store.id} value={store.id}>
-                    {store.name}
-                  </option>
-                ))}
-              </select>
-              <small style={{color: 'var(--text-muted)', fontSize: '0.75rem'}}>
-                Leave empty to apply to all stores
-              </small>
+            <div style={{display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--spacing-md)', marginBottom: 'var(--spacing-lg)'}}>
+              {[
+                { value: 'all', label: 'All Stores', icon: Store, description: 'Available in all stores' },
+                { value: 'premium', label: 'Premium Stores', icon: Target, description: 'Only premium/featured stores' },
+                { value: 'specific', label: 'Specific Store', icon: Gift, description: 'One specific store only' }
+              ].map(option => (
+                <label 
+                  key={option.value}
+                  style={{
+                    display: 'flex', 
+                    alignItems: 'flex-start', 
+                    gap: 'var(--spacing-sm)', 
+                    cursor: 'pointer',
+                    padding: 'var(--spacing-md)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-glass)',
+                    background: getCurrentStoreTargeting() === option.value ? 'var(--primary-bg)' : 'var(--bg-glass-light)',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="store_targeting"
+                    value={option.value}
+                    checked={getCurrentStoreTargeting() === option.value}
+                    onChange={() => handleStoreTargetingChange(option.value)}
+                    style={{marginTop: '2px'}}
+                  />
+                  <option.icon size={16} style={{marginTop: '2px', color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontWeight: '500', color: 'var(--text-secondary)'}}>{option.label}</div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>{option.description}</div>
+                  </div>
+                </label>
+              ))}
             </div>
 
-            {/* Valid From | Valid Until */}
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-lg)'}}>
-              <div className="form-group">
+            {/* Specific Store Search */}
+            {formData.for_specific_store === 1 && (
+              <div className="form-group" style={{marginBottom: 'var(--spacing-lg)', position: 'relative'}}>
                 <label className="form-label">
-                  <Calendar size={16} style={{marginRight: 'var(--spacing-sm)'}} />
-                  Valid From *
+                  <Store size={16} style={{marginRight: 'var(--spacing-sm)'}} />
+                  Search & Select Store *
                 </label>
-                <input
-                  type="date"
-                  name="valid_from"
-                  className="form-input"
-                  value={formData.valid_from}
-                  onChange={handleInputChange}
-                  style={{borderColor: errors.valid_from ? 'var(--error-border)' : undefined}}
-                />
-                {errors.valid_from && (
+                <div style={{position: 'relative'}}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Search store by name or email..."
+                    value={storeSearch}
+                    onChange={(e) => setStoreSearch(e.target.value)}
+                    style={{borderColor: errors.store_id ? 'var(--error-border)' : undefined}}
+                  />
+                  <Search size={16} style={{
+                    position: 'absolute',
+                    right: 'var(--spacing-md)',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    color: 'var(--text-disabled)'
+                  }} />
+                </div>
+                
+                {/* Store Search Results */}
+                {storeSearchResults.length > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-glass)',
+                    borderRadius: 'var(--radius-md)',
+                    maxHeight: '200px',
+                    overflowY: 'auto',
+                    zIndex: 1000,
+                    marginTop: '0.25rem'
+                  }}>
+                    {storeSearchResults.map(store => (
+                      <div
+                        key={store.id}
+                        style={{
+                          padding: 'var(--spacing-md)',
+                          cursor: 'pointer',
+                          borderBottom: '1px solid var(--border-light)',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.background = 'var(--bg-glass-light)'}
+                        onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                        onClick={() => handleStoreSelect(store)}
+                      >
+                        <div style={{fontWeight: '500', color: 'var(--text-primary)'}}>
+                          {store.name}
+                        </div>
+                        <div style={{fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
+                          {store.email || store.description || 'No description'} • ID: {store.id}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {storeSearchLoading && (
+                  <div style={{fontSize: '0.875rem', color: 'var(--text-disabled)', marginTop: '0.25rem'}}>
+                    Searching stores...
+                  </div>
+                )}
+                
+                {errors.store_id && (
                   <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                    {errors.valid_from}
+                    {errors.store_id}
                   </span>
                 )}
               </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  <Calendar size={16} style={{marginRight: 'var(--spacing-sm)'}} />
-                  Valid Until *
-                </label>
-                <input
-                  type="date"
-                  name="valid_until"
-                  className="form-input"
-                  value={formData.valid_until}
-                  onChange={handleInputChange}
-                  style={{borderColor: errors.valid_until ? 'var(--error-border)' : undefined}}
-                />
-                {errors.valid_until && (
-                  <span style={{color: 'var(--error-text)', fontSize: '0.75rem', marginTop: 'var(--spacing-xs)'}}>
-                    {errors.valid_until}
-                  </span>
-                )}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Status Settings */}
@@ -681,7 +1034,7 @@ const CouponEdit = () => {
                 checked={formData.is_active === 1}
                 onChange={handleInputChange}
               />
-              <label htmlFor="is_active" style={{color: 'var(--text-secondary)', cursor: 'pointer'}}>
+              <label htmlFor="is_active" style={{color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: '500'}}>
                 Coupon Active
               </label>
             </div>

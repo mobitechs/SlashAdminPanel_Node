@@ -1,10 +1,11 @@
-// pages/CouponManagement.js - FIXED: Client-side filtering & table scroll
+// pages/CouponManagement.js - UPDATED for coupon_master table
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Ticket, Plus, Search, Filter, Eye, Edit2, Trash2, 
   MoreHorizontal, X, TrendingUp, AlertCircle, Wifi, 
-  ChevronLeft, ChevronRight, Gift, Activity, Clock, Target
+  ChevronLeft, ChevronRight, Gift, Activity, Clock, Target,
+  Infinity, Users, Store
 } from 'lucide-react';
 import ErrorState from '../components/common/ErrorState';
 import '../styles/AdminStyles.css';
@@ -13,98 +14,30 @@ const CouponManagement = () => {
   const navigate = useNavigate();
   
   // State management
-  const [allCoupons, setAllCoupons] = useState([]); // Store all coupons for client-side filtering
+  const [allCoupons, setAllCoupons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
-  const [usingStaticData, setUsingStaticData] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(15);
 
-  // API configuration - FIXED: Corrected API base URL
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+  // API configuration
+  const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
 
   const getHeaders = () => ({
     'Content-Type': 'application/json',
     'Accept': 'application/json'
   });
 
-  // Static fallback data
-  const staticCouponsData = {
-    coupons: [
-      {
-        id: 1,
-        code: 'SAVE20',
-        title: 'Save 20% on Electronics',
-        description: 'Get 20% off on all electronics items with minimum order of ₹1000',
-        discount_amount: null,
-        discount_percentage: 20.00,
-        store_id: 1,
-        store_name: 'TechMart Electronics',
-        min_order_amount: 1000.00,
-        max_discount: 500.00,
-        valid_from: '2024-01-01T00:00:00Z',
-        valid_until: '2024-12-31T23:59:59Z',
-        usage_limit: 100,
-        total_used: 15,
-        is_active: 1,
-        created_at: '2024-01-15T10:30:00Z'
-      },
-      {
-        id: 2,
-        code: 'FLAT50',
-        title: 'Flat ₹50 Off',
-        description: 'Get flat ₹50 discount on minimum order of ₹200',
-        discount_amount: 50.00,
-        discount_percentage: null,
-        store_id: null,
-        store_name: 'All Stores',
-        min_order_amount: 200.00,
-        max_discount: 50.00,
-        valid_from: '2024-02-01T00:00:00Z',
-        valid_until: '2024-06-30T23:59:59Z',
-        usage_limit: 500,
-        total_used: 123,
-        is_active: 1,
-        created_at: '2024-02-01T09:15:00Z'
-      },
-      {
-        id: 3,
-        code: 'EXPIRED10',
-        title: 'Expired 10% Discount',
-        description: 'This coupon has expired',
-        discount_amount: null,
-        discount_percentage: 10.00,
-        store_id: 2,
-        store_name: 'Fashion Hub',
-        min_order_amount: 500.00,
-        max_discount: 200.00,
-        valid_from: '2023-12-01T00:00:00Z',
-        valid_until: '2024-01-31T23:59:59Z',
-        usage_limit: 50,
-        total_used: 45,
-        is_active: 0,
-        created_at: '2023-12-01T08:45:00Z'
-      }
-    ],
-    stats: {
-      totalCoupons: 3,
-      activeCoupons: 2,
-      totalRedemptions: 183,
-      totalSavings: 15650.00
-    }
-  };
-
-  // Fetch all coupons once and filter client-side
+  // Fetch all coupons
   const fetchAllCoupons = useCallback(async () => {
     try {
       setLoading(true);
       
-      // Try to fetch from API with a large limit to get all coupons
       const params = new URLSearchParams({
         limit: '1000',
         offset: '0',
@@ -153,20 +86,15 @@ const CouponManagement = () => {
         throw lastError || new Error('All coupons endpoints failed');
       }
 
-      // Process and store all coupons
       const processedData = processCouponsData(couponData);
       setAllCoupons(processedData.coupons || []);
-      setUsingStaticData(false);
       setError(null);
       
       console.log('✅ All coupons data loaded successfully');
 
     } catch (error) {
       console.warn('⚠️ Coupons API failed:', error.message);
-      
-      // Set empty data instead of static data
       setAllCoupons([]);
-      setUsingStaticData(false);
       setError(`Failed to load coupons: ${error.message}`);
     } finally {
       setLoading(false);
@@ -182,8 +110,7 @@ const CouponManagement = () => {
       const searchLower = searchTerm.toLowerCase().trim();
       filtered = filtered.filter(coupon => {
         return (
-          (coupon.code?.toLowerCase() || '').includes(searchLower) ||
-          (coupon.title?.toLowerCase() || '').includes(searchLower) ||
+          (coupon.coupon_name?.toLowerCase() || '').includes(searchLower) ||
           (coupon.description?.toLowerCase() || '').includes(searchLower) ||
           (coupon.store_name?.toLowerCase() || '').includes(searchLower)
         );
@@ -194,7 +121,11 @@ const CouponManagement = () => {
     if (statusFilter) {
       const now = new Date();
       filtered = filtered.filter(coupon => {
-        const validUntil = new Date(coupon.valid_until);
+        if (coupon.lifetime_validity) {
+          return statusFilter === 'active' ? coupon.is_active === 1 : false;
+        }
+        
+        const validUntil = new Date(coupon.valid_till || coupon.valid_until);
         const isExpired = validUntil < now;
         
         switch (statusFilter) {
@@ -215,13 +146,13 @@ const CouponManagement = () => {
       filtered = filtered.filter(coupon => {
         switch (typeFilter) {
           case 'percentage':
-            return coupon.discount_percentage && !coupon.discount_amount;
+            return coupon.discount_type === 'percentage';
           case 'fixed':
-            return coupon.discount_amount && !coupon.discount_percentage;
-          case 'store':
-            return coupon.store_id;
-          case 'global':
-            return !coupon.store_id;
+            return coupon.discount_type === 'fixed';
+          case 'lifetime':
+            return coupon.lifetime_validity === 1;
+          case 'limited':
+            return coupon.lifetime_validity === 0;
           default:
             return true;
         }
@@ -263,16 +194,21 @@ const CouponManagement = () => {
         coupons = [];
       }
 
+      // Normalize coupon data structure
+      coupons = coupons.map(coupon => ({
+        ...coupon,
+        id: coupon.id || coupon.coupon_id,
+        code: coupon.coupon_name, // Use coupon_name as code for display
+        title: coupon.coupon_name
+      }));
+
       if (coupons.length > 0 && stats.totalCoupons === 0) {
         const now = new Date();
         stats.totalCoupons = pagination.total || coupons.length;
-        stats.activeCoupons = coupons.filter(c => c.is_active === 1 && new Date(c.valid_until) >= now).length;
-        stats.totalRedemptions = coupons.reduce((sum, c) => sum + (parseInt(c.total_used) || 0), 0);
-        stats.totalSavings = coupons.reduce((sum, c) => {
-          const used = parseInt(c.total_used) || 0;
-          const avgDiscount = c.discount_amount || (c.max_discount || 100);
-          return sum + (used * avgDiscount);
-        }, 0);
+        stats.activeCoupons = coupons.filter(c => {
+          if (c.lifetime_validity) return c.is_active === 1;
+          return c.is_active === 1 && new Date(c.valid_till || c.valid_until) >= now;
+        }).length;
       }
 
       return { coupons, pagination, stats };
@@ -307,7 +243,7 @@ const CouponManagement = () => {
   };
 
   const getCouponInitials = (coupon) => {
-    return coupon.code?.substring(0, 2).toUpperCase() || '??';
+    return coupon.coupon_name?.substring(0, 2).toUpperCase() || '??';
   };
 
   const formatDate = (dateString) => {
@@ -324,25 +260,47 @@ const CouponManagement = () => {
   };
 
   const getCouponStatus = (coupon) => {
+    if (!coupon.is_active) return { status: 'inactive', color: 'error' };
+    
+    if (coupon.lifetime_validity) return { status: 'active', color: 'success' };
+    
     const now = new Date();
-    const validUntil = new Date(coupon.valid_until);
+    const validUntil = new Date(coupon.valid_till || coupon.valid_until);
     const validFrom = new Date(coupon.valid_from);
     
-    if (!coupon.is_active) return { status: 'inactive', color: 'error' };
     if (validUntil < now) return { status: 'expired', color: 'error' };
     if (validFrom > now) return { status: 'upcoming', color: 'warning' };
     return { status: 'active', color: 'success' };
   };
 
   const getDiscountDisplay = (coupon) => {
-    if (coupon.discount_percentage) {
-      return `${coupon.discount_percentage}% OFF`;
-    } else if (coupon.discount_amount) {
-      return `₹${coupon.discount_amount} OFF`;
+    if (coupon.discount_type === 'percentage') {
+      return `${coupon.discount_value}% OFF`;
+    } else if (coupon.discount_type === 'fixed') {
+      return `₹${coupon.discount_value} OFF`;
     }
     return 'N/A';
   };
 
+  const getTargetingDisplay = (coupon) => {
+    const targeting = [];
+    
+    if (coupon.for_all_user) targeting.push('All Users');
+    if (coupon.for_all_vip_user) targeting.push('VIP Users');
+    if (coupon.for_new_user) targeting.push('New Users');
+    if (coupon.for_specific_user) targeting.push('Specific User');
+    
+    return targeting.length > 0 ? targeting.join(', ') : 'All Users';
+  };
+
+  const getStoreDisplay = (coupon) => {
+    if (coupon.for_all_store) return 'All Stores';
+    if (coupon.for_all_premium_store) return 'Premium Stores';
+    if (coupon.for_specific_store && coupon.store_name) return coupon.store_name;
+    return 'All Stores';
+  };
+
+  // Delete coupon (set is_active = 0)
   // Delete coupon (set is_active = 0)
   const handleDeleteCoupon = async (couponId) => {
     if (!window.confirm('Are you sure you want to deactivate this coupon? This will set its status to inactive.')) {
@@ -404,19 +362,19 @@ const CouponManagement = () => {
   // Calculate stats from current coupons
   const currentStats = useMemo(() => {
     const now = new Date();
-    const activeCoupons = allCoupons.filter(c => c.is_active === 1 && new Date(c.valid_until) >= now).length;
-    const totalRedemptions = allCoupons.reduce((sum, c) => sum + (parseInt(c.total_used) || 0), 0);
-    const totalSavings = allCoupons.reduce((sum, c) => {
-      const used = parseInt(c.total_used) || 0;
-      const avgDiscount = c.discount_amount || (c.max_discount || 100);
-      return sum + (used * avgDiscount);
-    }, 0);
+    const activeCoupons = allCoupons.filter(c => {
+      if (c.lifetime_validity) return c.is_active === 1;
+      return c.is_active === 1 && new Date(c.valid_till || c.valid_until) >= now;
+    }).length;
     
     return {
       totalCoupons: allCoupons.length,
       activeCoupons,
-      totalRedemptions,
-      totalSavings
+      lifetimeCoupons: allCoupons.filter(c => c.lifetime_validity === 1).length,
+      expiredCoupons: allCoupons.filter(c => {
+        if (c.lifetime_validity) return false;
+        return new Date(c.valid_till || c.valid_until) < now;
+      }).length
     };
   }, [allCoupons]);
 
@@ -431,7 +389,7 @@ const CouponManagement = () => {
     );
   }
 
-  if (error && !usingStaticData) {
+  if (error) {
     return <ErrorState message={`Failed to load coupons: ${error}`} />;
   }
 
@@ -461,21 +419,21 @@ const CouponManagement = () => {
         
         <div className="stats-card">
           <div className="stats-content">
-            <div className="stats-value">{formatNumber(currentStats.totalRedemptions)}</div>
-            <div className="stats-label">Total Redemptions</div>
+            <div className="stats-value">{formatNumber(currentStats.lifetimeCoupons)}</div>
+            <div className="stats-label">Lifetime Coupons</div>
           </div>
           <div className="stats-icon info">
-            <Activity />
+            <Infinity />
           </div>
         </div>
 
         <div className="stats-card">
           <div className="stats-content">
-            <div className="stats-value">{formatCurrency(currentStats.totalSavings)}</div>
-            <div className="stats-label">Total Savings</div>
+            <div className="stats-value">{formatNumber(currentStats.expiredCoupons)}</div>
+            <div className="stats-label">Expired Coupons</div>
           </div>
           <div className="stats-icon warning">
-            <Gift />
+            <Clock />
           </div>
         </div>
       </div>
@@ -491,14 +449,39 @@ const CouponManagement = () => {
               <Search className="search-input-icon" />
               <input
                 type="text"
-                placeholder="Search by code, title, store..."
+                placeholder="Search by name, description..."
                 className="table-search-input"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
           </div>
+          
           <div className="table-actions">
+            <div className="table-filters">
+              <select
+                className="filter-select"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="expired">Expired</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              
+              <select
+                className="filter-select"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+              >
+                <option value="">All Types</option>
+                <option value="percentage">Percentage</option>
+                <option value="fixed">Fixed Amount</option>
+                <option value="lifetime">Lifetime</option>
+                <option value="limited">Limited</option>
+              </select>
+            </div>
             
             <button 
               className="add-user-btn"
@@ -529,11 +512,11 @@ const CouponManagement = () => {
                   <th style={{width: '80px', padding: 'var(--spacing-lg)'}}>ID</th>
                   <th style={{padding: 'var(--spacing-lg)'}}>Coupon Details</th>
                   <th style={{width: '120px', padding: 'var(--spacing-lg)'}}>Discount</th>
-                  <th style={{width: '150px', padding: 'var(--spacing-lg)'}}>Store</th>
-                  <th style={{width: '120px', padding: 'var(--spacing-lg)'}}>Min Order</th>
-                  <th style={{width: '100px', padding: 'var(--spacing-lg)'}}>Usage</th>
+                  <th style={{width: '120px', padding: 'var(--spacing-lg)'}}>Type</th>
+                  <th style={{width: '150px', padding: 'var(--spacing-lg)'}}>User Targeting</th>
+                  <th style={{width: '150px', padding: 'var(--spacing-lg)'}}>Store Scope</th>
                   <th style={{width: '100px', padding: 'var(--spacing-lg)'}}>Status</th>
-                  <th style={{width: '110px', padding: 'var(--spacing-lg)'}}>Valid Until</th>
+                  <th style={{width: '120px', padding: 'var(--spacing-lg)'}}>Valid Until</th>
                   <th style={{width: '140px', textAlign: 'center', padding: 'var(--spacing-lg)'}}>Actions</th>
                 </tr>
               </thead>
@@ -542,14 +525,14 @@ const CouponManagement = () => {
                   const status = getCouponStatus(coupon);
                   return (
                     <tr 
-                      key={coupon.id} 
+                      key={coupon.id || coupon.coupon_id} 
                       style={{height: '64px', cursor: 'pointer'}}
-                      onClick={(e) => handleRowClick(coupon.id, e)}
+                      onClick={(e) => handleRowClick(coupon.id || coupon.coupon_id, e)}
                       className="user-row-clickable"
                     >
                       <td style={{padding: 'var(--spacing-lg)'}}>
                         <span className="font-medium" style={{color: 'var(--text-secondary)'}}>
-                          #{coupon.id}
+                          #{coupon.id || coupon.coupon_id}
                         </span>
                       </td>
                       <td style={{padding: 'var(--spacing-lg)'}}>
@@ -559,9 +542,15 @@ const CouponManagement = () => {
                           </div>
                           <div>
                             <div className="user-name">
-                              {coupon.code}
+                              {coupon.coupon_name}
                             </div>
-                            <div className="user-email">{coupon.title}</div>
+                            <div className="user-email">
+                              {coupon.description ? 
+                                (coupon.description.length > 50 ? 
+                                  `${coupon.description.substring(0, 50)}...` : 
+                                  coupon.description
+                                ) : 'No description'}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -571,18 +560,21 @@ const CouponManagement = () => {
                         </span>
                       </td>
                       <td style={{padding: 'var(--spacing-lg)'}}>
-                        <span className="font-medium">
-                          {coupon.store_name || 'All Stores'}
+                        <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)'}}>
+                          {coupon.lifetime_validity ? <Infinity size={14} /> : <Clock size={14} />}
+                          <span className="font-medium">
+                            {coupon.lifetime_validity ? 'Lifetime' : 'Limited'}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{padding: 'var(--spacing-lg)'}}>
+                        <span className="font-medium" style={{fontSize: '0.85rem'}}>
+                          {getTargetingDisplay(coupon)}
                         </span>
                       </td>
                       <td style={{padding: 'var(--spacing-lg)'}}>
                         <span className="font-medium">
-                          {formatCurrency(coupon.min_order_amount)}
-                        </span>
-                      </td>
-                      <td style={{padding: 'var(--spacing-lg)'}}>
-                        <span className="transaction-count">
-                          {coupon.total_used || 0}/{coupon.usage_limit}
+                          {getStoreDisplay(coupon)}
                         </span>
                       </td>
                       <td style={{padding: 'var(--spacing-lg)'}}>
@@ -591,7 +583,9 @@ const CouponManagement = () => {
                         </span>
                       </td>
                       <td style={{padding: 'var(--spacing-lg)'}}>
-                        <span className="date-cell">{formatDate(coupon.valid_until)}</span>
+                        <span className="date-cell">
+                          {coupon.lifetime_validity ? 'Never' : formatDate(coupon.valid_till || coupon.valid_until)}
+                        </span>
                       </td>
                       <td style={{padding: 'var(--spacing-lg)', textAlign: 'center'}}>
                         <div className="action-buttons">
@@ -599,7 +593,7 @@ const CouponManagement = () => {
                             className="action-btn view"
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigate(`/coupons/${coupon.id}`);
+                              navigate(`/coupons/${coupon.id || coupon.coupon_id}`);
                             }}
                             title="View Details"
                           >
@@ -609,7 +603,7 @@ const CouponManagement = () => {
                             className="action-btn edit"
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigate(`/coupons/${coupon.id}/edit`);
+                              navigate(`/coupons/${coupon.id || coupon.coupon_id}/edit`);
                             }}
                             title="Edit Coupon"
                           >
@@ -619,7 +613,7 @@ const CouponManagement = () => {
                             className="action-btn delete"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDeleteCoupon(coupon.id);
+                              handleDeleteCoupon(coupon.id || coupon.coupon_id);
                             }}
                             title="Deactivate Coupon"
                           >

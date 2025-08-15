@@ -1,16 +1,19 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   Home, Users, ShoppingBag, Gift, CreditCard, Calculator, 
   Trophy, BarChart3, Settings, LogOut, Bell, Search,
-  FileText, HelpCircle, Video, Star, ClipboardList, Zap
+  FileText, HelpCircle, Video, Star, ClipboardList, Zap,
+  ChevronDown, User, Mail
 } from 'lucide-react';
 
 const DashboardLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   const handleLogout = () => {
     logout();
@@ -23,6 +26,18 @@ const DashboardLayout = () => {
     }
     return location.pathname.startsWith(path);
   };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsProfileDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const menuItems = [
     {
@@ -50,7 +65,7 @@ const DashboardLayout = () => {
       description: 'Transaction Management'
     },
     {
-      label: 'Settlements', // 🆕 NEW: Added Settlements
+      label: 'Settlements',
       icon: Calculator,
       path: '/settlements',
       description: 'Settlement Management'
@@ -68,7 +83,7 @@ const DashboardLayout = () => {
       description: 'Reward Management'
     },
     {
-      label: 'Daily Rewards', // 🆕 NEW: Added Daily Rewards
+      label: 'Daily Rewards',
       icon: Zap,
       path: '/daily-rewards',
       description: 'Daily Spin Rewards'
@@ -131,7 +146,6 @@ const DashboardLayout = () => {
             <div className="section-title">Financial</div>
           </div>
           
-          {/* Settlements and other financial items */}
           {menuItems.slice(4, 5).map((item) => (
             <div key={item.path} className="nav-item">
               <Link
@@ -151,7 +165,6 @@ const DashboardLayout = () => {
             <div className="section-title">Rewards & Engagement</div>
           </div>
           
-          {/* Rewards section: Coupons, Rewards, Daily Rewards, Reward History */}
           {menuItems.slice(5, 9).map((item) => (
             <div key={item.path} className="nav-item">
               <Link
@@ -171,7 +184,6 @@ const DashboardLayout = () => {
             <div className="section-title">Management</div>
           </div>
           
-          {/* Content and other management items */}
           {menuItems.slice(9).map((item) => (
             <div key={item.path} className="nav-item">
               <Link
@@ -187,47 +199,6 @@ const DashboardLayout = () => {
             </div>
           ))}
         </nav>
-
-        {/* User Profile */}
-        <div className="sidebar-user">
-          <div className="user-info">
-            <div className="user-avatar">
-              {user?.email?.charAt(0).toUpperCase() || 'A'}
-            </div>
-            <div className="user-details">
-              <div className="user-name">
-                {user?.name || 'Admin'}
-              </div>
-              <div className="user-email">
-                {user?.email || 'admin@slash.com'}
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="logout-btn"
-            title="Logout"
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              padding: 'var(--spacing-sm)',
-              borderRadius: 'var(--radius-sm)',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.background = 'var(--bg-glass-hover)';
-              e.target.style.color = 'var(--text-primary)';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.background = 'none';
-              e.target.style.color = 'var(--text-secondary)';
-            }}
-          >
-            <LogOut size={16} />
-          </button>
-        </div>
       </aside>
 
       {/* Main Content Area */}
@@ -253,11 +224,66 @@ const DashboardLayout = () => {
               <Settings size={16} />
             </button>
             
-            <div className="profile-dropdown">
-              <div className="user-avatar">
-                {user?.email?.charAt(0).toUpperCase() || 'A'}
-              </div>
-              <span>{user?.name || 'Admin'}</span>
+            {/* Enhanced Profile Dropdown */}
+            <div className="profile-dropdown-container" ref={dropdownRef}>
+              <button 
+                className="profile-dropdown-trigger"
+                onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+              >
+                <div className="user-avatar">
+                  {user?.email?.charAt(0).toUpperCase() || 'A'}
+                </div>
+                <div className="user-info-header">
+                  <span className="user-name">{user?.name || 'Admin'}</span>
+                </div>
+                <ChevronDown 
+                  size={16} 
+                  className={`dropdown-arrow ${isProfileDropdownOpen ? 'open' : ''}`}
+                />
+              </button>
+
+              {/* Dropdown Menu */}
+              {isProfileDropdownOpen && (
+                <div className="profile-dropdown-menu">
+                  <div className="profile-dropdown-header">
+                    <div className="user-avatar-large">
+                      {user?.email?.charAt(0).toUpperCase() || 'A'}
+                    </div>
+                    <div className="user-details-dropdown">
+                      <div className="user-name-dropdown">
+                        {user?.name || 'Admin'}
+                      </div>
+                      <div className="user-email-dropdown">
+                        {user?.email || 'admin@slash.com'}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="dropdown-divider"></div>
+                  
+                  <div className="profile-dropdown-content">
+                    <button className="dropdown-item">
+                      <User size={16} />
+                      <span>Profile Settings</span>
+                    </button>
+                    
+                    <button className="dropdown-item">
+                      <Settings size={16} />
+                      <span>Account Settings</span>
+                    </button>
+                    
+                    <div className="dropdown-divider"></div>
+                    
+                    <button 
+                      className="dropdown-item logout-item"
+                      onClick={handleLogout}
+                    >
+                      <LogOut size={16} />
+                      <span>Logout</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </header>

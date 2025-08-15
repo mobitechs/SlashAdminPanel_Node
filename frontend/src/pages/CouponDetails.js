@@ -1,10 +1,11 @@
-// pages/CouponDetails.js - FIXED: Real data only, proper data processing
+// pages/CouponDetails.js - UPDATED for coupon_master table
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
   Edit, Trash2, Tag, Store, Calendar, Clock,
   Ticket, Shield, Target, CheckCircle, Percent, Gift, 
-  Activity, Home, ChevronRight, Eye, Users, TrendingUp
+  Activity, Home, ChevronRight, Eye, Users, TrendingUp,
+  User, Crown, Infinity
 } from 'lucide-react';
 import ErrorState from '../components/common/ErrorState';
 import '../styles/AdminStyles.css';
@@ -16,10 +17,6 @@ const CouponDetails = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
-  
-  // State for showing full lists
-  const [showAllUsages, setShowAllUsages] = useState(false);
-  const [showAllUsers, setShowAllUsers] = useState(false);
 
   // API Configuration
   const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
@@ -117,69 +114,47 @@ const CouponDetails = () => {
     }
   };
 
-  // Process coupon data from API response - FIXED for real database structure
+  // Process coupon data from API response
   const processCouponData = (rawData) => {
     try {
       console.log('🔍 Processing raw API data:', rawData);
       
       let couponData = null;
-      let usages = [];
-      let users = [];
       
-      // Handle backend structure: { success: true, data: { coupon: {...}, usages: [...], users: [...] } }
       if (rawData.success && rawData.data) {
         couponData = rawData.data.coupon || rawData.data;
-        
-        // Get usages from the correct location
-        usages = rawData.data.usages || 
-                rawData.data.couponUsages || 
-                rawData.usages || 
-                rawData.couponUsages || 
-                [];
-                      
-        // Get users from the correct location
-        users = rawData.data.users || 
-               rawData.users || 
-               [];
       } else if (rawData.coupon) {
         couponData = rawData.coupon;
-        usages = rawData.usages || rawData.couponUsages || [];
-        users = rawData.users || [];
-      } else if (rawData.id) {
+      } else if (rawData.id || rawData.coupon_id) {
         couponData = rawData;
-        usages = rawData.usages || rawData.couponUsages || [];
-        users = rawData.users || [];
       } else {
         console.error('❌ Unrecognized API response structure:', rawData);
         throw new Error('Invalid API response format - no coupon data found');
       }
 
       console.log('🔍 Extracted coupon data:', couponData);
-      console.log('🔍 Extracted usages:', usages);
-      console.log('🔍 Extracted users:', users);
 
       if (!couponData) {
         throw new Error('Coupon data is null or undefined');
       }
 
-      if (!couponData.id) {
+      if (!couponData.id && !couponData.coupon_id) {
         console.error('❌ Coupon data missing ID field:', couponData);
         throw new Error('Coupon data missing required ID field');
       }
 
-      if (couponData.id != id) {
-        throw new Error(`Coupon ID mismatch: expected ${id}, got ${couponData.id}`);
+      // Ensure we have the right ID
+      const couponId = couponData.id || couponData.coupon_id;
+      if (couponId != id) {
+        throw new Error(`Coupon ID mismatch: expected ${id}, got ${couponId}`);
       }
 
-      // Attach usage data to coupon
-      couponData.usages = Array.isArray(usages) ? usages : [];
-      couponData.users = Array.isArray(users) ? users : [];
-
-      console.log('✅ Final processed coupon data:');
-      console.log('📊 Usages found:', couponData.usages.length);
-      console.log('👥 Users found:', couponData.users.length);
-      console.log('📝 First usage:', couponData.usages[0]);
-      console.log('👤 First user:', couponData.users[0]);
+      // Normalize the data structure
+      couponData.id = couponId;
+      couponData.code = couponData.coupon_name; // Use coupon_name as code
+      couponData.title = couponData.coupon_name;
+      
+      console.log('✅ Final processed coupon data:', couponData);
       
       return couponData;
     } catch (error) {
@@ -192,25 +167,6 @@ const CouponDetails = () => {
   useEffect(() => {
     fetchCouponDetails();
   }, [id]);
-
-  // Functions to get limited lists
-  const getDisplayedUsages = () => {
-    if (!coupon?.usages || !Array.isArray(coupon.usages)) {
-      console.log('🔍 No usages found or not an array:', coupon?.usages);
-      return [];
-    }
-    console.log(`🔍 Displaying ${showAllUsages ? 'all' : 'top 10'} of ${coupon.usages.length} usages`);
-    return showAllUsages ? coupon.usages : coupon.usages.slice(0, 10);
-  };
-
-  const getDisplayedUsers = () => {
-    if (!coupon?.users || !Array.isArray(coupon.users)) {
-      console.log('🔍 No users found or not an array:', coupon?.users);
-      return [];
-    }
-    console.log(`🔍 Displaying ${showAllUsers ? 'all' : 'top 10'} of ${coupon.users.length} users`);
-    return showAllUsers ? coupon.users : coupon.users.slice(0, 10);
-  };
 
   // Helper functions
   const formatCurrency = (amount) => {
@@ -231,39 +187,47 @@ const CouponDetails = () => {
     }
   };
 
-  const formatDateTime = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      return new Date(dateString).toLocaleString('en-IN', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch {
-      return 'Invalid Date';
-    }
-  };
-
   const getCouponStatus = (coupon) => {
     const now = new Date();
-    const validUntil = new Date(coupon.valid_until);
-    const validFrom = new Date(coupon.valid_from);
     
     if (!coupon.is_active) return { status: 'Inactive', color: 'error' };
+    
+    if (coupon.lifetime_validity) return { status: 'Active (Lifetime)', color: 'success' };
+    
+    const validUntil = new Date(coupon.valid_till || coupon.valid_until);
+    const validFrom = new Date(coupon.valid_from);
+    
     if (validUntil < now) return { status: 'Expired', color: 'error' };
     if (validFrom > now) return { status: 'Upcoming', color: 'warning' };
     return { status: 'Active', color: 'success' };
   };
 
   const getDiscountDisplay = (coupon) => {
-    if (coupon.discount_percentage) {
-      return `${coupon.discount_percentage}% OFF`;
-    } else if (coupon.discount_amount) {
-      return `₹${coupon.discount_amount} OFF`;
+    if (coupon.discount_type === 'percentage') {
+      return `${coupon.discount_value}% OFF`;
+    } else if (coupon.discount_type === 'fixed') {
+      return `₹${coupon.discount_value} OFF`;
     }
     return 'N/A';
+  };
+
+  const getApplicability = (coupon) => {
+    const applicability = [];
+    
+    // User applicability
+    if (coupon.for_all_user) applicability.push('All Users');
+    if (coupon.for_all_vip_user) applicability.push('VIP Users');
+    if (coupon.for_specific_user) applicability.push('Specific User');
+    if (coupon.for_new_user) applicability.push('New Users');
+    
+    return applicability.length > 0 ? applicability.join(', ') : 'No specific targeting';
+  };
+
+  const getStoreApplicability = (coupon) => {
+    if (coupon.for_all_store) return 'All Stores';
+    if (coupon.for_all_premium_store) return 'Premium Stores';
+    if (coupon.for_specific_store && coupon.store_name) return coupon.store_name;
+    return 'Not specified';
   };
 
   const handleDeleteCoupon = async () => {
@@ -320,7 +284,6 @@ const CouponDetails = () => {
     );
   }
 
-  // Show error state if API failed and no coupon data
   if (error && !coupon) {
     return (
       <div className="page-container">
@@ -383,7 +346,7 @@ const CouponDetails = () => {
           gap: 'var(--spacing-sm)'
         }}>
           <Ticket size={24} style={{color: 'var(--text-muted)'}} />
-          #{coupon.id} {coupon.code} - {coupon.title}
+          #{coupon.id} {coupon.coupon_name}
         </h1>
         
         <div style={{display: 'flex', gap: 'var(--spacing-md)'}}>
@@ -410,7 +373,7 @@ const CouponDetails = () => {
               <h3>Discount Value</h3>
               <div className="stat-value">{getDiscountDisplay(coupon)}</div>
               <p className="stat-subtitle">
-                {coupon.discount_percentage ? 'Percentage' : 'Fixed Amount'}
+                {coupon.discount_type === 'percentage' ? 'Percentage' : 'Fixed Amount'}
               </p>
             </div>
             <div className="stat-icon" style={{background: 'var(--gradient-green)'}}>
@@ -422,14 +385,16 @@ const CouponDetails = () => {
         <div className="stat-card">
           <div className="stat-card-content">
             <div className="stat-info">
-              <h3>Usage Count</h3>
-              <div className="stat-value">{coupon.total_used || 0}</div>
+              <h3>Validity</h3>
+              <div className="stat-value">
+                {coupon.lifetime_validity ? 'Lifetime' : 'Limited'}
+              </div>
               <p className="stat-subtitle">
-                Out of {coupon.usage_limit} limit
+                {coupon.lifetime_validity ? 'No expiry' : `Until ${formatDate(coupon.valid_till)}`}
               </p>
             </div>
             <div className="stat-icon" style={{background: 'var(--gradient-blue)'}}>
-              <Activity />
+              {coupon.lifetime_validity ? <Infinity /> : <Clock />}
             </div>
           </div>
         </div>
@@ -437,12 +402,14 @@ const CouponDetails = () => {
         <div className="stat-card">
           <div className="stat-card-content">
             <div className="stat-info">
-              <h3>Min Order</h3>
-              <div className="stat-value">{formatCurrency(coupon.min_order_amount)}</div>
-              <p className="stat-subtitle">Minimum requirement</p>
+              <h3>User Targeting</h3>
+              <div className="stat-value" style={{fontSize: '0.9rem'}}>
+                {getApplicability(coupon)}
+              </div>
+              <p className="stat-subtitle">Target audience</p>
             </div>
             <div className="stat-icon" style={{background: 'var(--gradient-orange)'}}>
-              <Target />
+              <Users />
             </div>
           </div>
         </div>
@@ -450,376 +417,161 @@ const CouponDetails = () => {
         <div className="stat-card">
           <div className="stat-card-content">
             <div className="stat-info">
-              <h3>Max Discount</h3>
-              <div className="stat-value">{formatCurrency(coupon.max_discount)}</div>
-              <p className="stat-subtitle">Maximum cap</p>
+              <h3>Store Scope</h3>
+              <div className="stat-value" style={{fontSize: '0.9rem'}}>
+                {getStoreApplicability(coupon)}
+              </div>
+              <p className="stat-subtitle">Applicable stores</p>
             </div>
             <div className="stat-icon" style={{background: 'var(--gradient-purple)'}}>
-              <Gift />
+              <Store />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Tab Navigation */}
+      {/* Coupon Details */}
       <div className="chart-card">
-        <div style={{display: 'flex', borderBottom: '1px solid var(--border-glass)', marginBottom: 'var(--spacing-lg)'}}>
-          <button 
-            className={`tab-button ${activeTab === 'overview' ? 'active' : ''}`}
-            onClick={() => setActiveTab('overview')}
-            style={{
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'overview' ? '2px solid var(--text-primary)' : '2px solid transparent',
-              color: activeTab === 'overview' ? 'var(--text-primary)' : 'var(--text-muted)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--spacing-sm)',
-              fontSize: '0.875rem',
-              fontWeight: '500'
-            }}
-          >
-            <Ticket size={16} />
-            Overview
-          </button>
-          <button 
-            className={`tab-button ${activeTab === 'usages' ? 'active' : ''}`}
-            onClick={() => setActiveTab('usages')}
-            style={{
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'usages' ? '2px solid var(--text-primary)' : '2px solid transparent',
-              color: activeTab === 'usages' ? 'var(--text-primary)' : 'var(--text-muted)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--spacing-sm)',
-              fontSize: '0.875rem',
-              fontWeight: '500'
-            }}
-          >
-            <Activity size={16} />
-            Usage History ({(coupon.usages && coupon.usages.length) || 0})
-          </button>
-          <button 
-            className={`tab-button ${activeTab === 'users' ? 'active' : ''}`}
-            onClick={() => setActiveTab('users')}
-            style={{
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'users' ? '2px solid var(--text-primary)' : '2px solid transparent',
-              color: activeTab === 'users' ? 'var(--text-primary)' : 'var(--text-muted)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--spacing-sm)',
-              fontSize: '0.875rem',
-              fontWeight: '500'
-            }}
-          >
-            <Users size={16} />
-            Users ({(coupon.users && coupon.users.length) || 0})
-          </button>
+        <div className="chart-header">
+          <h3 className="chart-title">Coupon Information</h3>
         </div>
 
         <div style={{padding: 'var(--spacing-lg)'}}>
-          {activeTab === 'overview' && (
-            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--spacing-xl)'}}>
-              {/* Coupon Information */}
-              <div>
-                <h3 style={{fontSize: '1.125rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
-                  <Tag size={18} />
-                  Coupon Information
-                </h3>
-                <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)'}}>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Tag size={16} style={{color: 'var(--text-muted)'}} />
-                    <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Coupon Code</div>
-                      <div style={{color: 'var(--text-secondary)', fontWeight: '600'}}>{coupon.code}</div>
-                    </div>
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--spacing-xl)'}}>
+            {/* Basic Information */}
+            <div>
+              <h3 style={{fontSize: '1.125rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
+                <Tag size={18} />
+                Basic Information
+              </h3>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)'}}>
+                <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                  <Ticket size={16} style={{color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Coupon Name</div>
+                    <div style={{color: 'var(--text-secondary)', fontWeight: '600'}}>{coupon.coupon_name}</div>
                   </div>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Ticket size={16} style={{color: 'var(--text-muted)'}} />
-                    <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Title</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{coupon.title}</div>
-                    </div>
+                </div>
+                <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                  <Gift size={16} style={{color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Description</div>
+                    <div style={{color: 'var(--text-secondary)'}}>{coupon.description || 'No description'}</div>
                   </div>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Gift size={16} style={{color: 'var(--text-muted)'}} />
-                    <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Description</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{coupon.description || 'No description'}</div>
-                    </div>
-                  </div>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Shield size={16} style={{color: 'var(--text-muted)'}} />
-                    <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Status</div>
-                      <div style={{color: status.color === 'success' ? 'var(--success-text)' : status.color === 'error' ? 'var(--error-text)' : 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)'}}>
-                        <CheckCircle size={14} />
-                        {status.status}
-                      </div>
+                </div>
+                <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                  <Shield size={16} style={{color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Status</div>
+                    <div style={{color: status.color === 'success' ? 'var(--success-text)' : status.color === 'error' ? 'var(--error-text)' : 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)'}}>
+                      <CheckCircle size={14} />
+                      {status.status}
                     </div>
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Store & Validity Information */}
-              <div>
-                <h3 style={{fontSize: '1.125rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
-                  <Store size={18} />
-                  Store & Validity
-                </h3>
-                <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)'}}>
+            {/* Discount & Validity */}
+            <div>
+              <h3 style={{fontSize: '1.125rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
+                <Percent size={18} />
+                Discount & Validity
+              </h3>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)'}}>
+                <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                  <Percent size={16} style={{color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Discount Type</div>
+                    <div style={{color: 'var(--text-secondary)', fontWeight: '600'}}>{coupon.discount_type}</div>
+                  </div>
+                </div>
+                <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                  <Gift size={16} style={{color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Discount Value</div>
+                    <div style={{color: 'var(--success-text)', fontWeight: '600'}}>{coupon.discount_value}</div>
+                  </div>
+                </div>
+                {!coupon.lifetime_validity && (
+                  <>
+                    <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                      <Calendar size={16} style={{color: 'var(--text-muted)'}} />
+                      <div>
+                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Valid From</div>
+                        <div style={{color: 'var(--text-secondary)'}}>{formatDate(coupon.valid_from)}</div>
+                      </div>
+                    </div>
+                    <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                      <Clock size={16} style={{color: 'var(--text-muted)'}} />
+                      <div>
+                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Valid Until</div>
+                        <div style={{color: 'var(--text-secondary)'}}>{formatDate(coupon.valid_till)}</div>
+                      </div>
+                    </div>
+                  </>
+                )}
+                {coupon.lifetime_validity && (
                   <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Store size={16} style={{color: 'var(--text-muted)'}} />
+                    <Infinity size={16} style={{color: 'var(--text-muted)'}} />
                     <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Applicable Store</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{coupon.store_name || 'All Stores'}</div>
+                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Validity</div>
+                      <div style={{color: 'var(--success-text)', fontWeight: '600'}}>Lifetime Validity</div>
                     </div>
                   </div>
+                )}
+              </div>
+            </div>
+
+            {/* Targeting & Applicability */}
+            <div>
+              <h3 style={{fontSize: '1.125rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
+                <Target size={18} />
+                Targeting & Applicability
+              </h3>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)'}}>
+                <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                  <Users size={16} style={{color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>User Targeting</div>
+                    <div style={{color: 'var(--text-secondary)'}}>{getApplicability(coupon)}</div>
+                  </div>
+                </div>
+                <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                  <Store size={16} style={{color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Store Applicability</div>
+                    <div style={{color: 'var(--text-secondary)'}}>{getStoreApplicability(coupon)}</div>
+                  </div>
+                </div>
+                {coupon.new_user_name && (
                   <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Calendar size={16} style={{color: 'var(--text-muted)'}} />
+                    <User size={16} style={{color: 'var(--text-muted)'}} />
                     <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Valid From</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{formatDate(coupon.valid_from)}</div>
+                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Specific User</div>
+                      <div style={{color: 'var(--text-secondary)'}}>{coupon.new_user_name}</div>
                     </div>
                   </div>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Clock size={16} style={{color: 'var(--text-muted)'}} />
-                    <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Valid Until</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{formatDate(coupon.valid_until)}</div>
-                    </div>
-                  </div>
+                )}
+                {coupon.new_user_mobile_no && (
                   <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
                     <Target size={16} style={{color: 'var(--text-muted)'}} />
                     <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Usage Limit</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{coupon.usage_limit} times</div>
+                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>User Mobile</div>
+                      <div style={{color: 'var(--text-secondary)'}}>{coupon.new_user_mobile_no}</div>
                     </div>
                   </div>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Calendar size={16} style={{color: 'var(--text-muted)'}} />
-                    <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Created On</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{formatDate(coupon.created_at)}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Discount Details */}
-              <div>
-                <h3 style={{fontSize: '1.125rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: 'var(--spacing-lg)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)'}}>
-                  <Percent size={18} />
-                  Discount Details
-                </h3>
-                <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)'}}>
-                  {coupon.discount_percentage && (
-                    <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                      <Percent size={16} style={{color: 'var(--text-muted)'}} />
-                      <div>
-                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Discount Percentage</div>
-                        <div style={{color: 'var(--success-text)', fontWeight: '600'}}>{coupon.discount_percentage}%</div>
-                      </div>
-                    </div>
-                  )}
-                  {coupon.discount_amount && (
-                    <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                      <Gift size={16} style={{color: 'var(--text-muted)'}} />
-                      <div>
-                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Discount Amount</div>
-                        <div style={{color: 'var(--success-text)', fontWeight: '600'}}>{formatCurrency(coupon.discount_amount)}</div>
-                      </div>
-                    </div>
-                  )}
-                  <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Target size={16} style={{color: 'var(--text-muted)'}} />
-                    <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Minimum Order Amount</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{formatCurrency(coupon.min_order_amount)}</div>
-                    </div>
-                  </div>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
-                    <Gift size={16} style={{color: 'var(--text-muted)'}} />
-                    <div>
-                      <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Maximum Discount</div>
-                      <div style={{color: 'var(--text-secondary)'}}>{formatCurrency(coupon.max_discount)}</div>
-                    </div>
+                )}
+                <div style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)'}}>
+                  <Calendar size={16} style={{color: 'var(--text-muted)'}} />
+                  <div>
+                    <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>Created On</div>
+                    <div style={{color: 'var(--text-secondary)'}}>{formatDate(coupon.created_at)}</div>
                   </div>
                 </div>
               </div>
             </div>
-          )}
-
-          {activeTab === 'usages' && (
-            <div>
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-lg)'}}>
-                <h3 style={{fontSize: '1.125rem', fontWeight: '600', color: 'var(--text-primary)', margin: 0}}>
-                  Usage History
-                </h3>
-                {coupon.usages && coupon.usages.length > 10 && !showAllUsages && (
-                  <span style={{fontSize: '0.875rem', color: 'var(--text-muted)'}}>
-                    Showing {Math.min(10, coupon.usages.length)} of {coupon.usages.length} usages
-                  </span>
-                )}
-              </div>
-              
-              {getDisplayedUsages().length > 0 ? (
-                <>
-                  <div style={{overflowX: 'auto'}}>
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>User</th>
-                          <th>Transaction</th>
-                          <th>Used At</th>
-                          <th>Order Amount</th>
-                          <th>Discount Applied</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {getDisplayedUsages().map((usage) => (
-                          <tr key={usage.id}>
-                            <td>{usage.user_name || 'N/A'}</td>
-                            <td style={{fontWeight: '500'}}>{usage.transaction_number || 'N/A'}</td>
-                            <td className="date-cell">{formatDateTime(usage.used_at)}</td>
-                            <td>{formatCurrency(usage.order_amount || 0)}</td>
-                            <td style={{color: 'var(--success-text)'}}>{formatCurrency(usage.discount_applied || 0)}</td>
-                            <td>
-                              <span className="status-badge success">
-                                Used
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  
-                  {/* See More/Show Less Button for Usages */}
-                  {coupon.usages && coupon.usages.length > 10 && (
-                    <div style={{textAlign: 'center', marginTop: 'var(--spacing-lg)'}}>
-                      <button 
-                        className="btn btn-secondary"
-                        onClick={() => setShowAllUsages(!showAllUsages)}
-                        style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', margin: '0 auto'}}
-                      >
-                        {showAllUsages ? (
-                          <>
-                            <Eye size={16} />
-                            Show Less
-                          </>
-                        ) : (
-                          <>
-                            <ChevronRight size={16} />
-                            See More ({coupon.usages.length - 10} more)
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <ErrorState
-                  title="No usage history found"
-                  message="This coupon hasn't been used yet."
-                  showRetry={false}
-                  showBackButton={false}
-                  showDebugInfo={false}
-                />
-              )}
-            </div>
-          )}
-
-          {activeTab === 'users' && (
-            <div>
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-lg)'}}>
-                <h3 style={{fontSize: '1.125rem', fontWeight: '600', color: 'var(--text-primary)', margin: 0}}>
-                  Users with this Coupon
-                </h3>
-                {coupon.users && coupon.users.length > 10 && !showAllUsers && (
-                  <span style={{fontSize: '0.875rem', color: 'var(--text-muted)'}}>
-                    Showing {Math.min(10, coupon.users.length)} of {coupon.users.length} users
-                  </span>
-                )}
-              </div>
-              
-              {getDisplayedUsers().length > 0 ? (
-                <>
-                  <div style={{overflowX: 'auto'}}>
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>User</th>
-                          <th>Email</th>
-                          <th>Phone</th>
-                          <th>Status</th>
-                          <th>Added On</th>
-                          <th>Used</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {getDisplayedUsers().map((user) => (
-                          <tr key={user.id}>
-                            <td>{user.first_name} {user.last_name}</td>
-                            <td>{user.email}</td>
-                            <td>{user.phone_number || 'N/A'}</td>
-                            <td>
-                              <span className={`status-badge ${user.is_used ? 'success' : 'default'}`}>
-                                {user.is_used ? 'Used' : 'Available'}
-                              </span>
-                            </td>
-                            <td className="date-cell">{formatDate(user.created_at)}</td>
-                            <td className="date-cell">{user.used_at ? formatDateTime(user.used_at) : 'Not Used'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  
-                  {/* See More/Show Less Button for Users */}
-                  {coupon.users && coupon.users.length > 10 && (
-                    <div style={{textAlign: 'center', marginTop: 'var(--spacing-lg)'}}>
-                      <button 
-                        className="btn btn-secondary"
-                        onClick={() => setShowAllUsers(!showAllUsers)}
-                        style={{display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', margin: '0 auto'}}
-                      >
-                        {showAllUsers ? (
-                          <>
-                            <Eye size={16} />
-                            Show Less
-                          </>
-                        ) : (
-                          <>
-                            <ChevronRight size={16} />
-                            See More ({coupon.users.length - 10} more)
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <ErrorState
-                  title="No users found"
-                  message="No users have this coupon yet."
-                  showRetry={false}
-                  showBackButton={false}
-                  showDebugInfo={false}
-                />
-              )}
-            </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-// routes/coupons.js - Complete Coupon Management API (FIXED for Real Database)
+// routes/coupons.js - Complete Coupon Management API (UPDATED for coupon_master table)
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/database');
@@ -25,30 +25,42 @@ router.get('/', async (req, res) => {
     
     console.log('Parsed params:', { limitInt, offsetInt, search, status, store_id });
     
-    // Base query with store information and usage statistics
+    // Base query with store information
     let query = `
       SELECT 
-        c.id,
-        c.code,
-        c.title,
+        c.coupon_id as id,
+        c.coupon_id,
+        c.coupon_name,
         c.description,
-        c.discount_amount,
-        c.discount_percentage,
-        c.store_id,
-        c.min_order_amount,
-        c.max_discount,
+        c.discount_type,
+        c.discount_value,
         c.valid_from,
-        c.valid_until,
-        c.usage_limit,
+        c.valid_till as valid_until,
+        c.lifetime_validity,
+        c.for_all_user,
+        c.for_all_vip_user,
+        c.for_specific_user,
+        c.for_all_store,
+        c.for_all_premium_store,
+        c.for_specific_store,
+        c.for_new_user,
+        c.new_user_name,
+        c.new_user_mobile_no,
+        c.store_id,
+        c.user_id,
         c.is_active,
         c.created_at,
         c.updated_at,
+        c.updated_by,
         s.name as store_name,
-        COUNT(DISTINCT uc.id) as total_used,
-        COUNT(DISTINCT CASE WHEN uc.is_used = 1 THEN uc.id END) as total_redeemed
-      FROM coupons c
+        CASE 
+          WHEN c.for_all_store = 1 THEN 'All Stores'
+          WHEN c.for_all_premium_store = 1 THEN 'Premium Stores'
+          WHEN c.for_specific_store = 1 AND s.name IS NOT NULL THEN s.name
+          ELSE 'All Stores'
+        END as applicable_store
+      FROM coupon_master c
       LEFT JOIN stores s ON c.store_id = s.id
-      LEFT JOIN user_coupons uc ON c.id = uc.coupon_id
       WHERE 1=1
     `;
     
@@ -56,9 +68,9 @@ router.get('/', async (req, res) => {
     
     // Add search functionality
     if (search && search.trim()) {
-      query += ` AND (c.code LIKE ? OR c.title LIKE ? OR c.description LIKE ? OR s.name LIKE ?)`;
+      query += ` AND (c.coupon_name LIKE ? OR c.description LIKE ? OR s.name LIKE ?)`;
       const searchTerm = `%${search.trim()}%`;
-      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+      params.push(searchTerm, searchTerm, searchTerm);
     }
     
     // Add status filter
@@ -66,11 +78,11 @@ router.get('/', async (req, res) => {
       const now = new Date().toISOString();
       switch (status.toLowerCase()) {
         case 'active':
-          query += ` AND c.is_active = 1 AND c.valid_until >= ?`;
+          query += ` AND c.is_active = 1 AND (c.lifetime_validity = 1 OR c.valid_till >= ?)`;
           params.push(now);
           break;
         case 'expired':
-          query += ` AND c.valid_until < ?`;
+          query += ` AND c.lifetime_validity = 0 AND c.valid_till < ?`;
           params.push(now);
           break;
         case 'inactive':
@@ -86,20 +98,12 @@ router.get('/', async (req, res) => {
     // Add store filter
     if (store_id !== undefined && store_id !== '') {
       if (store_id === 'global') {
-        query += ` AND c.store_id IS NULL`;
+        query += ` AND c.for_all_store = 1`;
       } else {
-        query += ` AND c.store_id = ?`;
+        query += ` AND (c.store_id = ? OR c.for_all_store = 1)`;
         params.push(parseInt(store_id));
       }
     }
-    
-    // Add GROUP BY clause
-    query += ` 
-      GROUP BY 
-        c.id, c.code, c.title, c.description, c.discount_amount, c.discount_percentage,
-        c.store_id, c.min_order_amount, c.max_discount, c.valid_from, c.valid_until,
-        c.usage_limit, c.is_active, c.created_at, c.updated_at, s.name
-    `;
     
     // Add ordering and pagination
     query += ` ORDER BY c.created_at DESC LIMIT ${limitInt} OFFSET ${offsetInt}`;
@@ -112,28 +116,28 @@ router.get('/', async (req, res) => {
     
     // Get total count for pagination
     let countQuery = `
-      SELECT COUNT(DISTINCT c.id) as total 
-      FROM coupons c 
+      SELECT COUNT(DISTINCT c.coupon_id) as total 
+      FROM coupon_master c 
       LEFT JOIN stores s ON c.store_id = s.id
       WHERE 1=1
     `;
     const countParams = [];
     
     if (search && search.trim()) {
-      countQuery += ` AND (c.code LIKE ? OR c.title LIKE ? OR c.description LIKE ? OR s.name LIKE ?)`;
+      countQuery += ` AND (c.coupon_name LIKE ? OR c.description LIKE ? OR s.name LIKE ?)`;
       const searchTerm = `%${search.trim()}%`;
-      countParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+      countParams.push(searchTerm, searchTerm, searchTerm);
     }
     
     if (status !== undefined && status !== '') {
       const now = new Date().toISOString();
       switch (status.toLowerCase()) {
         case 'active':
-          countQuery += ` AND c.is_active = 1 AND c.valid_until >= ?`;
+          countQuery += ` AND c.is_active = 1 AND (c.lifetime_validity = 1 OR c.valid_till >= ?)`;
           countParams.push(now);
           break;
         case 'expired':
-          countQuery += ` AND c.valid_until < ?`;
+          countQuery += ` AND c.lifetime_validity = 0 AND c.valid_till < ?`;
           countParams.push(now);
           break;
         case 'inactive':
@@ -148,9 +152,9 @@ router.get('/', async (req, res) => {
     
     if (store_id !== undefined && store_id !== '') {
       if (store_id === 'global') {
-        countQuery += ` AND c.store_id IS NULL`;
+        countQuery += ` AND c.for_all_store = 1`;
       } else {
-        countQuery += ` AND c.store_id = ?`;
+        countQuery += ` AND (c.store_id = ? OR c.for_all_store = 1)`;
         countParams.push(parseInt(store_id));
       }
     }
@@ -161,14 +165,9 @@ router.get('/', async (req, res) => {
     // Get stats for dashboard
     const [statsResult] = await pool.execute(`
       SELECT 
-        COUNT(DISTINCT c.id) as totalCoupons,
-        COUNT(DISTINCT CASE WHEN c.is_active = 1 AND c.valid_until >= NOW() THEN c.id END) as activeCoupons,
-        COUNT(DISTINCT uc.id) as totalRedemptions,
-        COALESCE(SUM(CASE WHEN uc.is_used = 1 THEN 
-          COALESCE(c.discount_amount, c.max_discount, 0) 
-        END), 0) as totalSavings
-      FROM coupons c
-      LEFT JOIN user_coupons uc ON c.id = uc.coupon_id
+        COUNT(DISTINCT c.coupon_id) as totalCoupons,
+        COUNT(DISTINCT CASE WHEN c.is_active = 1 AND (c.lifetime_validity = 1 OR c.valid_till >= NOW()) THEN c.coupon_id END) as activeCoupons
+      FROM coupon_master c
     `);
     
     console.log(`✅ Found ${coupons.length} coupons out of ${total} total`);
@@ -188,23 +187,10 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error fetching coupons:', error);
-    console.error('SQL Error Details:', {
-      code: error.code,
-      errno: error.errno,
-      sqlState: error.sqlState,
-      sqlMessage: error.sqlMessage,
-      sql: error.sql
-    });
-    
     res.status(500).json({
       success: false,
       message: 'Failed to fetch coupons',
-      error: error.message,
-      debug: {
-        code: error.code,
-        errno: error.errno,
-        sqlMessage: error.sqlMessage
-      }
+      error: error.message
     });
   }
 });
@@ -223,35 +209,39 @@ router.get('/:id', async (req, res) => {
       });
     }
     
-    // 1. Get coupon details with store information
+    // Get coupon details with store information
     const [coupons] = await pool.execute(`
       SELECT 
-        c.id,
-        c.code,
-        c.title,
+        c.coupon_id as id,
+        c.coupon_id,
+        c.coupon_name,
         c.description,
-        c.discount_amount,
-        c.discount_percentage,
-        c.store_id,
-        c.min_order_amount,
-        c.max_discount,
+        c.discount_type,
+        c.discount_value,
         c.valid_from,
-        c.valid_until,
-        c.usage_limit,
+        c.valid_till as valid_until,
+        c.lifetime_validity,
+        c.for_all_user,
+        c.for_all_vip_user,
+        c.for_specific_user,
+        c.for_all_store,
+        c.for_all_premium_store,
+        c.for_specific_store,
+        c.for_new_user,
+        c.new_user_name,
+        c.new_user_mobile_no,
+        c.store_id,
+        c.user_id,
         c.is_active,
         c.created_at,
         c.updated_at,
+        c.updated_by,
         s.name as store_name,
-        COUNT(DISTINCT uc.id) as total_used,
-        COUNT(DISTINCT CASE WHEN uc.is_used = 1 THEN uc.id END) as total_redeemed
-      FROM coupons c
+        u.first_name as updated_by_name
+      FROM coupon_master c
       LEFT JOIN stores s ON c.store_id = s.id
-      LEFT JOIN user_coupons uc ON c.id = uc.coupon_id
-      WHERE c.id = ?
-      GROUP BY 
-        c.id, c.code, c.title, c.description, c.discount_amount, c.discount_percentage,
-        c.store_id, c.min_order_amount, c.max_discount, c.valid_from, c.valid_until,
-        c.usage_limit, c.is_active, c.created_at, c.updated_at, s.name
+      LEFT JOIN users u ON c.updated_by = u.id
+      WHERE c.coupon_id = ?
     `, [couponId]);
     
     if (coupons.length === 0) {
@@ -263,59 +253,14 @@ router.get('/:id', async (req, res) => {
     
     const coupon = coupons[0];
     
-    // 2. Get usage history with transaction and user details
-    const [usages] = await pool.execute(`
-      SELECT 
-        uc.id,
-        uc.user_id,
-        uc.coupon_id,
-        uc.is_used,
-        uc.used_at,
-        uc.transaction_id,
-        uc.created_at,
-        u.first_name,
-        u.last_name,
-        u.email,
-        u.phone_number,
-        CONCAT(u.first_name, ' ', u.last_name) as user_name,
-        t.transaction_number,
-        t.bill_amount as order_amount,
-        t.coupon_discount as discount_applied
-      FROM user_coupons uc
-      LEFT JOIN users u ON uc.user_id = u.id
-      LEFT JOIN transactions t ON uc.transaction_id = t.id
-      WHERE uc.coupon_id = ? AND uc.is_used = 1
-      ORDER BY uc.used_at DESC
-    `, [couponId]);
-    
-    // 3. Get all users who have this coupon (used and unused)
-    const [users] = await pool.execute(`
-      SELECT 
-        uc.id,
-        uc.user_id,
-        uc.is_used,
-        uc.used_at,
-        uc.created_at,
-        u.first_name,
-        u.last_name,
-        u.email,
-        u.phone_number
-      FROM user_coupons uc
-      LEFT JOIN users u ON uc.user_id = u.id
-      WHERE uc.coupon_id = ?
-      ORDER BY uc.created_at DESC
-    `, [couponId]);
-    
     console.log(`✅ Coupon ${couponId} details fetched successfully`);
-    console.log(`📊 Found ${usages.length} usages`);
-    console.log(`👥 Found ${users.length} users with this coupon`);
     
     res.json({
       success: true,
       data: {
         coupon,
-        usages,
-        users
+        usages: [], // No usage tracking in coupon_master
+        users: []   // No user tracking in coupon_master
       }
     });
   } catch (error) {
@@ -335,65 +280,62 @@ router.post('/', async (req, res) => {
     console.log('Request data:', req.body);
     
     const {
-      code,
-      title,
+      coupon_name,
       description,
-      discount_amount,
-      discount_percentage,
-      store_id,
-      min_order_amount = 0,
-      max_discount,
+      discount_type,
+      discount_value,
       valid_from,
-      valid_until,
-      usage_limit = 1,
-      is_active = 1
+      valid_till,
+      lifetime_validity = 0,
+      for_all_user = 1,
+      for_all_vip_user = 0,
+      for_specific_user = 0,
+      for_all_store = 1,
+      for_all_premium_store = 0,
+      for_specific_store = 0,
+      for_new_user = 0,
+      new_user_name,
+      new_user_mobile_no,
+      store_id,
+      user_id,
+      is_active = 1,
+      updated_by
     } = req.body;
 
     // Validate required fields
-    if (!code || !title || !valid_from || !valid_until) {
+    if (!coupon_name || !discount_type || !discount_value) {
       return res.status(400).json({
         success: false,
-        message: 'Required fields: code, title, valid_from, valid_until'
+        message: 'Required fields: coupon_name, discount_type, discount_value'
       });
     }
 
-    // Validate discount configuration
-    if (!discount_amount && !discount_percentage) {
+    // Validate discount type
+    if (!['percentage', 'fixed'].includes(discount_type)) {
       return res.status(400).json({
         success: false,
-        message: 'Either discount_amount or discount_percentage must be provided'
+        message: 'discount_type must be either "percentage" or "fixed"'
       });
     }
 
-    if (discount_amount && discount_percentage) {
+    // Validate dates if not lifetime validity
+    if (!lifetime_validity && (!valid_from || !valid_till)) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot have both discount_amount and discount_percentage'
+        message: 'valid_from and valid_till are required when lifetime_validity is false'
       });
     }
 
-    // Validate dates
-    const fromDate = new Date(valid_from);
-    const untilDate = new Date(valid_until);
-    
-    if (untilDate <= fromDate) {
-      return res.status(400).json({
-        success: false,
-        message: 'valid_until must be after valid_from'
-      });
-    }
-
-    // Check if coupon code already exists
-    const [existingCoupons] = await pool.execute(
-      'SELECT id, code FROM coupons WHERE code = ?',
-      [code.toUpperCase()]
-    );
-
-    if (existingCoupons.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Coupon code already exists'
-      });
+    if (!lifetime_validity && valid_from && valid_till) {
+      const fromDate = new Date(valid_from);
+      const tillDate = new Date(valid_till);
+      
+      if (tillDate <= fromDate) {
+        return res.status(400).json({
+          success: false,
+          message: 'valid_till must be after valid_from'
+        });
+      }
     }
 
     // Validate store_id if provided
@@ -414,35 +356,51 @@ router.post('/', async (req, res) => {
     try {
       // Insert new coupon
       const [result] = await pool.execute(`
-        INSERT INTO coupons (
-          code, 
-          title, 
+        INSERT INTO coupon_master (
+          coupon_name, 
           description, 
-          discount_amount,
-          discount_percentage,
-          store_id,
-          min_order_amount,
-          max_discount,
+          discount_type,
+          discount_value,
           valid_from,
-          valid_until,
-          usage_limit,
+          valid_till,
+          lifetime_validity,
+          for_all_user,
+          for_all_vip_user,
+          for_specific_user,
+          for_all_store,
+          for_all_premium_store,
+          for_specific_store,
+          for_new_user,
+          new_user_name,
+          new_user_mobile_no,
+          store_id,
+          user_id,
           is_active,
           created_at, 
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+          updated_at,
+          updated_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
       `, [
-        code.toUpperCase(),
-        title,
+        coupon_name,
         description || null,
-        discount_amount || null,
-        discount_percentage || null,
+        discount_type,
+        discount_value,
+        valid_from || null,
+        valid_till || null,
+        lifetime_validity,
+        for_all_user,
+        for_all_vip_user,
+        for_specific_user,
+        for_all_store,
+        for_all_premium_store,
+        for_specific_store,
+        for_new_user,
+        new_user_name || null,
+        new_user_mobile_no || null,
         store_id || null,
-        min_order_amount,
-        max_discount || null,
-        valid_from,
-        valid_until,
-        usage_limit,
-        is_active
+        user_id || null,
+        is_active,
+        updated_by || null
       ]);
 
       const couponId = result.insertId;
@@ -451,25 +409,12 @@ router.post('/', async (req, res) => {
       // Fetch the complete created coupon data
       const [createdCoupons] = await pool.execute(`
         SELECT 
-          c.id,
-          c.code,
-          c.title,
-          c.description,
-          c.discount_amount,
-          c.discount_percentage,
-          c.store_id,
-          c.min_order_amount,
-          c.max_discount,
-          c.valid_from,
-          c.valid_until,
-          c.usage_limit,
-          c.is_active,
-          c.created_at,
-          c.updated_at,
+          c.coupon_id as id,
+          c.*,
           s.name as store_name
-        FROM coupons c
+        FROM coupon_master c
         LEFT JOIN stores s ON c.store_id = s.id
-        WHERE c.id = ?
+        WHERE c.coupon_id = ?
       `, [couponId]);
 
       console.log(`✅ Coupon ${couponId} created successfully`);
@@ -484,15 +429,6 @@ router.post('/', async (req, res) => {
 
     } catch (error) {
       console.error('❌ Error creating coupon:', error);
-      
-      // Handle specific database errors
-      if (error.code === 'ER_DUP_ENTRY') {
-        return res.status(400).json({
-          success: false,
-          message: 'Coupon code already exists'
-        });
-      }
-
       throw error;
     }
 
@@ -524,7 +460,7 @@ router.put('/:id', async (req, res) => {
     
     // Check if coupon exists
     const [existingCoupons] = await pool.execute(
-      'SELECT id FROM coupons WHERE id = ?',
+      'SELECT coupon_id FROM coupon_master WHERE coupon_id = ?',
       [couponId]
     );
     
@@ -535,38 +471,23 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    // Validate discount configuration if provided
-    if (updateData.discount_amount && updateData.discount_percentage) {
+    // Validate discount type if provided
+    if (updateData.discount_type && !['percentage', 'fixed'].includes(updateData.discount_type)) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot have both discount_amount and discount_percentage'
+        message: 'discount_type must be either "percentage" or "fixed"'
       });
     }
 
     // Validate dates if provided
-    if (updateData.valid_from && updateData.valid_until) {
+    if (updateData.valid_from && updateData.valid_till && !updateData.lifetime_validity) {
       const fromDate = new Date(updateData.valid_from);
-      const untilDate = new Date(updateData.valid_until);
+      const tillDate = new Date(updateData.valid_till);
       
-      if (untilDate <= fromDate) {
+      if (tillDate <= fromDate) {
         return res.status(400).json({
           success: false,
-          message: 'valid_until must be after valid_from'
-        });
-      }
-    }
-
-    // Check for duplicate coupon code if code is being updated
-    if (updateData.code) {
-      const [duplicateCoupons] = await pool.execute(
-        'SELECT id FROM coupons WHERE code = ? AND id != ?',
-        [updateData.code.toUpperCase(), couponId]
-      );
-      
-      if (duplicateCoupons.length > 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Coupon code already exists'
+          message: 'valid_till must be after valid_from'
         });
       }
     }
@@ -592,31 +513,28 @@ router.put('/:id', async (req, res) => {
       const updateParams = [];
 
       const allowedFields = [
-        'code', 'title', 'description', 'discount_amount', 'discount_percentage',
-        'store_id', 'min_order_amount', 'max_discount', 'valid_from', 
-        'valid_until', 'usage_limit', 'is_active'
+        'coupon_name', 'description', 'discount_type', 'discount_value',
+        'valid_from', 'valid_till', 'lifetime_validity', 'for_all_user',
+        'for_all_vip_user', 'for_specific_user', 'for_all_store',
+        'for_all_premium_store', 'for_specific_store', 'for_new_user',
+        'new_user_name', 'new_user_mobile_no', 'store_id', 'user_id',
+        'is_active', 'updated_by'
       ];
 
       allowedFields.forEach(field => {
         if (updateData[field] !== undefined) {
-            updateFields.push(`${field} = ?`);
-            let value = updateData[field];
-            
-            // Special handling for specific fields
-            if (field === 'code' && value) {
-            value = value.toUpperCase();
-            } else if (field === 'store_id' && value === '') {
+          updateFields.push(`${field} = ?`);
+          let value = updateData[field];
+          
+          if (field === 'store_id' && value === '') {
             value = null;
-            } else if ((field === 'discount_amount' || field === 'discount_percentage') && value === '') {
-            value = null;
-            } else if (field === 'valid_from' || field === 'valid_until') {
-            // FIXED: Format dates properly for MySQL timestamp columns
+          } else if ((field === 'valid_from' || field === 'valid_till') && value) {
             value = formatDateForMySQL(value);
-            }
-            
-            updateParams.push(value);
+          }
+          
+          updateParams.push(value);
         }
-    }); 
+      });
 
       if (updateFields.length === 0) {
         return res.status(400).json({
@@ -628,32 +546,19 @@ router.put('/:id', async (req, res) => {
       updateParams.push(couponId);
 
       await pool.execute(
-        `UPDATE coupons SET ${updateFields.join(', ')}, updated_at = NOW() WHERE id = ?`,
+        `UPDATE coupon_master SET ${updateFields.join(', ')}, updated_at = NOW() WHERE coupon_id = ?`,
         updateParams
       );
 
       // Fetch updated coupon
       const [updatedCoupons] = await pool.execute(`
         SELECT 
-          c.id,
-          c.code,
-          c.title,
-          c.description,
-          c.discount_amount,
-          c.discount_percentage,
-          c.store_id,
-          c.min_order_amount,
-          c.max_discount,
-          c.valid_from,
-          c.valid_until,
-          c.usage_limit,
-          c.is_active,
-          c.created_at,
-          c.updated_at,
+          c.coupon_id as id,
+          c.*,
           s.name as store_name
-        FROM coupons c
+        FROM coupon_master c
         LEFT JOIN stores s ON c.store_id = s.id
-        WHERE c.id = ?
+        WHERE c.coupon_id = ?
       `, [couponId]);
 
       console.log(`✅ Coupon ${couponId} updated successfully`);
@@ -668,14 +573,6 @@ router.put('/:id', async (req, res) => {
 
     } catch (error) {
       console.error('❌ Error updating coupon:', error);
-      
-      if (error.code === 'ER_DUP_ENTRY') {
-        return res.status(400).json({
-          success: false,
-          message: 'Coupon code already exists'
-        });
-      }
-
       throw error;
     }
 
@@ -707,7 +604,7 @@ router.patch('/:id', async (req, res) => {
     
     // Check if coupon exists
     const [existingCoupons] = await pool.execute(
-      'SELECT id FROM coupons WHERE id = ?',
+      'SELECT coupon_id FROM coupon_master WHERE coupon_id = ?',
       [couponId]
     );
     
@@ -720,7 +617,7 @@ router.patch('/:id', async (req, res) => {
 
     // Update coupon status
     const [result] = await pool.execute(
-      'UPDATE coupons SET is_active = ?, updated_at = NOW() WHERE id = ?',
+      'UPDATE coupon_master SET is_active = ?, updated_at = NOW() WHERE coupon_id = ?',
       [is_active, couponId]
     );
 
@@ -764,7 +661,7 @@ router.delete('/:id', async (req, res) => {
     
     // Check if coupon exists
     const [existingCoupons] = await pool.execute(
-      'SELECT id FROM coupons WHERE id = ?',
+      'SELECT coupon_id FROM coupon_master WHERE coupon_id = ?',
       [couponId]
     );
     
@@ -775,57 +672,25 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    // Check if coupon has been used
-    const [usageCheck] = await pool.execute(
-      'SELECT COUNT(*) as usage_count FROM user_coupons WHERE coupon_id = ? AND is_used = 1',
+    // Delete the coupon
+    const [result] = await pool.execute(
+      'DELETE FROM coupon_master WHERE coupon_id = ?',
       [couponId]
     );
 
-    if (usageCheck[0].usage_count > 0) {
-      return res.status(400).json({
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
         success: false,
-        message: 'Cannot delete coupon that has been used. Consider deactivating instead.'
+        message: 'Coupon not found'
       });
     }
 
-    const connection = await pool.getConnection();
-    await connection.beginTransaction();
+    console.log(`✅ Coupon ${couponId} deleted successfully`);
 
-    try {
-      // Delete user_coupons first (foreign key constraint)
-      await connection.execute(
-        'DELETE FROM user_coupons WHERE coupon_id = ?',
-        [couponId]
-      );
-
-      // Delete the coupon
-      const [result] = await connection.execute(
-        'DELETE FROM coupons WHERE id = ?',
-        [couponId]
-      );
-
-      await connection.commit();
-
-      if (result.affectedRows === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Coupon not found'
-        });
-      }
-
-      console.log(`✅ Coupon ${couponId} deleted successfully`);
-
-      res.json({
-        success: true,
-        message: 'Coupon deleted successfully'
-      });
-
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    res.json({
+      success: true,
+      message: 'Coupon deleted successfully'
+    });
 
   } catch (error) {
     console.error('❌ Error deleting coupon:', error);
@@ -838,13 +703,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // Helper functions
-function isValidDate(dateString) {
-  const date = new Date(dateString);
-  return date instanceof Date && !isNaN(date);
-}
-
 function formatDateForMySQL(dateString) {
-  // Convert ISO string to MySQL timestamp format
   const date = new Date(dateString);
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
